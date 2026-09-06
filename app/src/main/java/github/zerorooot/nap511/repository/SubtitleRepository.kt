@@ -107,8 +107,8 @@ class SubtitleRepository {
         val v = videoBaseName.lowercase()
         val s = subtitleBaseName.lowercase()
         if (v == s) return true
-        val longer = if (s.length > v) s else v
-        val shorter = if (s.length > v) v else s
+        val longer = if (s.length > v.length) s else v
+        val shorter = if (s.length > v.length) v else s
         if (!longer.startsWith(shorter)) return false
         // 剩余部分以分隔符开头（. _ - 空格），视为同一文件的不同标签版本
         val rest = longer.substring(shorter.length)
