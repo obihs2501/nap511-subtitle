@@ -70,7 +70,7 @@ fun PreferenceItem(
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = summary,
-                        color = if (enabled) MiuixTheme.colorScheme.onSurfaceVariant
+                        color = if (enabled) MiuixTheme.colorScheme.onSurfaceVariantSummary
                         else MiuixTheme.colorScheme.disabledOnSurface,
                     )
                 }
@@ -79,7 +79,7 @@ fun PreferenceItem(
             androidx.compose.material3.Icon(
                 imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = null,
-                tint = MiuixTheme.colorScheme.onSurfaceVariant
+                tint = MiuixTheme.colorScheme.onSurfaceVariantSummary
             )
         }
     }
@@ -116,7 +116,7 @@ fun SwitchPreferenceItem(
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = summary,
-                        color = if (enabled) MiuixTheme.colorScheme.onSurfaceVariant
+                        color = if (enabled) MiuixTheme.colorScheme.onSurfaceVariantSummary
                         else MiuixTheme.colorScheme.disabledOnSurface,
                     )
                 }
@@ -165,7 +165,7 @@ fun EditTextPreferenceItem(
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = summary,
-                    color = if (enabled) MiuixTheme.colorScheme.onSurfaceVariant
+                    color = if (enabled) MiuixTheme.colorScheme.onSurfaceVariantSummary
                     else MiuixTheme.colorScheme.disabledOnSurface,
                 )
             }
@@ -173,7 +173,7 @@ fun EditTextPreferenceItem(
             androidx.compose.material3.Icon(
                 imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = null,
-                tint = MiuixTheme.colorScheme.onSurfaceVariant
+                tint = MiuixTheme.colorScheme.onSurfaceVariantSummary
             )
         }
     }
@@ -231,7 +231,7 @@ fun ListPreferenceItem(
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = value,
-                    color = if (enabled) MiuixTheme.colorScheme.onSurfaceVariant
+                    color = if (enabled) MiuixTheme.colorScheme.onSurfaceVariantSummary
                     else MiuixTheme.colorScheme.disabledOnSurface,
                 )
             }
@@ -239,7 +239,7 @@ fun ListPreferenceItem(
             androidx.compose.material3.Icon(
                 imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = null,
-                tint = MiuixTheme.colorScheme.onSurfaceVariant
+                tint = MiuixTheme.colorScheme.onSurfaceVariantSummary
             )
         }
     }
