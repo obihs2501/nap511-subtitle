@@ -64,6 +64,9 @@ public class MyGSYVideoPlayer extends StandardGSYVideoPlayer {
     protected void init(Context context) {
         super.init(context);
         GSYVideoType.setShowType(GSYVideoType.SCREEN_TYPE_DEFAULT);
+        // 强制使用 SurfaceView 渲染：TextureView 在新 Android (API 33+ / SurfaceFlinger) 上
+        // MediaCodec setOutputSurface 可能失败导致白屏无声，SurfaceView 直接走 surface 通路更稳定
+        GSYVideoType.setRenderType(GSYVideoType.SURFACE);
         initView();
     }
 
