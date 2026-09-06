@@ -238,6 +238,8 @@ fun FileScreen(
             val intent = Intent(context, VideoActivity::class.java).apply {
                 putExtra("fileBeanIndex", videoDate.index)
                 putExtra("bean", videoInfoBeanJson)
+                // 传入视频所在目录 cid，用于查找同目录字幕
+                putExtra("parentCid", fileViewModel.currentCid)
             }
             videoActivityLauncher.launch(intent)
         }
