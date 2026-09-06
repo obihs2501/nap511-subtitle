@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -28,10 +29,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringArrayResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import github.zerorooot.nap511.R
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
+import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
+import top.yukonga.miuix.kmp.basic.SmallTopAppBar
+import top.yukonga.miuix.kmp.basic.rememberTopAppBarState
 import github.zerorooot.nap511.bean.LocationBean
 import github.zerorooot.nap511.bean.SettingUiState
 import github.zerorooot.nap511.screenitem.EditTextPreferenceItem
@@ -176,21 +183,19 @@ fun SettingContent(
     val themeArray = stringArrayResource(R.array.themeMode)
 
     Column {
-        TopAppBar(
-            windowInsets = TopAppBarDefaults.windowInsets.only(WindowInsetsSides.Top),
-            title = { Text(text = "高级设置") },
-            colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                navigationIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                actionIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer
-            ),
+        // MIUI 风格顶栏
+        SmallTopAppBar(
+            title = "高级设置",
             navigationIcon = {
-                TopAppBarActionButton(
-                    imageVector = Icons.Rounded.Menu,
-                    description = "navigationIcon",
+                IconButton(
                     onClick = { onActionClick("topAppBarActionButtonOnClick") }
-                )
+                ) {
+                    Icon(
+                        modifier = Modifier.size(22.dp),
+                        imageVector = Icons.Rounded.Menu,
+                        contentDescription = "菜单",
+                    )
+                }
             }
         )
 

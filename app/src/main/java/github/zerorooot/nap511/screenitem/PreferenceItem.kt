@@ -1,20 +1,17 @@
 package github.zerorooot.nap511.screenitem
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -23,18 +20,23 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import github.zerorooot.nap511.dialog.BaseDialog
+import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.SmallTitle
+import top.yukonga.miuix.kmp.basic.Switch
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.utils.PressFeedbackType
 
-// 分组标题组件
+// 分组标题组件（MIUI 风格小标题）
 @Composable
 fun PreferenceCategoryHeader(title: String) {
-    Text(
+    SmallTitle(
         text = title,
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 8.dp)
+        modifier = Modifier.padding(top = 12.dp)
     )
 }
 
@@ -46,11 +48,41 @@ fun PreferenceItem(
     enabled: Boolean = true,
     onClick: () -> Unit = {}
 ) {
-    ListItem(
-        headlineContent = { Text(text = title) },
-        supportingContent = summary?.let { { Text(text = it) } },
-        modifier = Modifier.clickable(enabled = enabled, onClick = onClick)
-    )
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        pressFeedbackType = PressFeedbackType.Sink,
+        showIndication = true,
+        onClick = if (enabled) onClick else null,
+        insideMargin = androidx.compose.foundation.layout.PaddingValues(
+            top = 14.dp, bottom = 14.dp, start = 20.dp, end = 16.dp
+        )
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    color = if (enabled) MiuixTheme.colorScheme.onSurface
+                    else MiuixTheme.colorScheme.disabledOnSurface,
+                )
+                if (summary != null) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = summary,
+                        color = if (enabled) MiuixTheme.colorScheme.onSurfaceVariant
+                        else MiuixTheme.colorScheme.disabledOnSurface,
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            androidx.compose.material3.Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MiuixTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
 }
 
 // 2. 开关选项（如：屏幕自动旋转、日志记录）
@@ -62,34 +94,41 @@ fun SwitchPreferenceItem(
     enabled: Boolean = true,
     onCheckedChange: (Boolean) -> Unit
 ) {
-    val disabledAlpha = 0.38f
-    val headlineColor = if (enabled) {
-        MaterialTheme.colorScheme.onSurface
-    } else {
-        MaterialTheme.colorScheme.onSurface.copy(alpha = disabledAlpha)
-    }
-    val supportingColor = if (enabled) {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = disabledAlpha)
-    }
-
-    ListItem(
-        headlineContent = { Text(text = title) },
-        supportingContent = summary?.let { { Text(text = it) } },
-        trailingContent = {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        pressFeedbackType = PressFeedbackType.Sink,
+        showIndication = true,
+        onClick = if (enabled) { { onCheckedChange(!checked) } } else null,
+        insideMargin = androidx.compose.foundation.layout.PaddingValues(
+            top = 14.dp, bottom = 14.dp, start = 20.dp, end = 16.dp
+        )
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    color = if (enabled) MiuixTheme.colorScheme.onSurface
+                    else MiuixTheme.colorScheme.disabledOnSurface,
+                )
+                if (summary != null) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = summary,
+                        color = if (enabled) MiuixTheme.colorScheme.onSurfaceVariant
+                        else MiuixTheme.colorScheme.disabledOnSurface,
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(8.dp))
             Switch(
                 checked = checked,
                 enabled = enabled,
                 onCheckedChange = onCheckedChange
             )
-        },
-        colors = ListItemDefaults.colors(
-            headlineColor = headlineColor,
-            supportingColor = supportingColor
-        ),
-        modifier = Modifier.clickable(enabled = enabled) { onCheckedChange(!checked) }
-    )
+        }
+    }
 }
 
 // 3. 弹窗输入选项（如：修改 uid、password、aria2地址等）
@@ -104,32 +143,40 @@ fun EditTextPreferenceItem(
     onValueSave: (String) -> Unit
 ) {
     var showDialog by remember { mutableStateOf(false) }
-// 禁用状态下的透明度，符合 Material 3 规范 (0.38f)
-    val disabledAlpha = 0.38f
 
-    val headlineColor = if (enabled) {
-        MaterialTheme.colorScheme.onSurface
-    } else {
-        MaterialTheme.colorScheme.onSurface.copy(alpha = disabledAlpha)
-    }
-
-    val supportingColor = if (enabled) {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = disabledAlpha)
-    }
-
-    ListItem(
-        headlineContent = { Text(text = title) },
-        supportingContent = { Text(text = summary) },
-        colors = ListItemDefaults.colors(
-            headlineColor = headlineColor,
-            supportingColor = supportingColor
-        ),
-        modifier = Modifier.clickable(enabled = enabled) {
-            showDialog = true
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        pressFeedbackType = PressFeedbackType.Sink,
+        showIndication = true,
+        onClick = if (enabled) { { showDialog = true } } else null,
+        insideMargin = androidx.compose.foundation.layout.PaddingValues(
+            top = 14.dp, bottom = 14.dp, start = 20.dp, end = 16.dp
+        )
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    color = if (enabled) MiuixTheme.colorScheme.onSurface
+                    else MiuixTheme.colorScheme.disabledOnSurface,
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = summary,
+                    color = if (enabled) MiuixTheme.colorScheme.onSurfaceVariant
+                    else MiuixTheme.colorScheme.disabledOnSurface,
+                )
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            androidx.compose.material3.Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MiuixTheme.colorScheme.onSurfaceVariant
+            )
         }
-    )
+    }
 
     if (showDialog) {
         BaseDialog(
@@ -151,6 +198,7 @@ fun EditTextPreferenceItem(
     }
 }
 
+// 4. 列表选择项（如：浮动按钮位置、主题模式）
 @Composable
 fun ListPreferenceItem(
     title: String,
@@ -161,32 +209,45 @@ fun ListPreferenceItem(
     onValueSave: (String) -> Unit
 ) {
     var showDialog by remember { mutableStateOf(false) }
-    val disabledAlpha = 0.38f
-    val headlineColor =
-        if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(
-            alpha = disabledAlpha
-        )
-    val supportingColor =
-        if (enabled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(
-            alpha = disabledAlpha
-        )
 
-    ListItem(
-        headlineContent = { Text(text = title) },
-        supportingContent = { Text(text = value) },
-        colors = ListItemDefaults.colors(
-            headlineColor = headlineColor,
-            supportingColor = supportingColor
-        ),
-        modifier = Modifier.clickable(enabled = enabled) {
-            showDialog = true
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        pressFeedbackType = PressFeedbackType.Sink,
+        showIndication = true,
+        onClick = if (enabled) { { showDialog = true } } else null,
+        insideMargin = androidx.compose.foundation.layout.PaddingValues(
+            top = 14.dp, bottom = 14.dp, start = 20.dp, end = 16.dp
+        )
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    color = if (enabled) MiuixTheme.colorScheme.onSurface
+                    else MiuixTheme.colorScheme.disabledOnSurface,
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = value,
+                    color = if (enabled) MiuixTheme.colorScheme.onSurfaceVariant
+                    else MiuixTheme.colorScheme.disabledOnSurface,
+                )
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            androidx.compose.material3.Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MiuixTheme.colorScheme.onSurfaceVariant
+            )
         }
-    )
+    }
 
     if (showDialog && enabled) {
         AlertDialog(
             onDismissRequest = { showDialog = false },
-            title = { Text(text = title) },
+            title = { androidx.compose.material3.Text(text = title) },
             text = {
                 Column {
                     entries.forEachIndexed { index, entry ->
@@ -195,10 +256,6 @@ fun ListPreferenceItem(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable {
-                                    onValueSave(entryValue)
-                                    showDialog = false
-                                }
                                 .padding(vertical = 12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -210,14 +267,14 @@ fun ListPreferenceItem(
                                 }
                             )
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text(text = entry)
+                            androidx.compose.material3.Text(text = entry)
                         }
                     }
                 }
             },
             confirmButton = {
                 TextButton(onClick = { showDialog = false }) {
-                    Text("取消")
+                    androidx.compose.material3.Text(text = "取消")
                 }
             }
         )

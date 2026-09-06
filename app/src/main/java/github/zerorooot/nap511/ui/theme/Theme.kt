@@ -9,6 +9,9 @@ import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.theme.ThemeController
+import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 
 
 private val DarkColorScheme = darkColorScheme(
@@ -40,6 +43,7 @@ fun Nap511Theme(
     dynamicColor: Boolean = true,
     content: @Composable () -> Unit
 ) {
+    // Material3 色彩方案（nap511 现有 Material3 组件继续使用）
     val colorScheme = when {
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             val context = LocalContext.current
@@ -50,9 +54,22 @@ fun Nap511Theme(
         else -> LightColorScheme
     }
 
+    // miuix 主题控制器：跟随系统深浅色（System 模式最稳定，Monet 依赖系统动态色）
+    val themeController = androidx.compose.runtime.remember(darkTheme) {
+        ThemeController(
+            colorSchemeMode = ColorSchemeMode.System,
+            isDark = darkTheme,
+            keyColor = androidx.compose.ui.graphics.Color(0xFF3482FF)
+        )
+    }
+
     MaterialTheme(
         colorScheme = colorScheme,
         typography = Typography,
-        content = content
-    )
+    ) {
+        // 在 Material3 内部再套一层 MiuixTheme，使 miuix 组件可用
+        MiuixTheme(controller = themeController) {
+            content()
+        }
+    }
 }
