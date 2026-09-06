@@ -59,11 +59,12 @@ fun AppTopBarNormal(title: String, onClick: (name: String) -> Unit) {
             actionIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer
         ),
         navigationIcon = {
+            // 主界面用汉堡按钮打开 Drawer（返回由系统 Back 或二级页面再触发）
             TopAppBarActionButton(
-                imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                imageVector = Icons.Rounded.Menu,
                 description = "navigationIcon"
             ) {
-                onClick.invoke("back")
+                onClick.invoke("ModalNavigationDrawerMenu")
             }
         },
         actions = {

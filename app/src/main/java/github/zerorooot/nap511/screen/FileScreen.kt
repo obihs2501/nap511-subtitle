@@ -133,6 +133,7 @@ fun FileScreen(
     audioViewModel: AudioViewModel,
     isExpandedScreen: Boolean,
     onNav: (Route) -> Unit,
+    onOpenDrawer: () -> Unit,
     drawerState: () -> Boolean
 ) {
     val fabPositionSetting by DataStoreUtil.getDataFlow(
@@ -423,6 +424,10 @@ fun FileScreen(
         when (name) {
             "back" -> {
                 onBack()
+            }
+
+            "ModalNavigationDrawerMenu" -> {
+                onOpenDrawer()
             }
 
             "视频时间" -> {

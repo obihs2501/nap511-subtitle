@@ -403,6 +403,9 @@ class MainActivity : AppCompatActivity() {
                                 scope.launch(Dispatchers.Main) {
                                     navController.navigate(it)
                                 }
+                            },
+                            {
+                                scope.launch { drawerState.open() }
                             }
                         ) {
                             val open = drawerState.isOpen
