@@ -18,3 +18,6 @@ app/src/test/
 app/release/
 .artifacts
 .proxyai
+# 本地构建产物
+app-debug.apk
+*.apk
