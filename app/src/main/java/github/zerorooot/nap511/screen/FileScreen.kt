@@ -238,8 +238,6 @@ fun FileScreen(
             val intent = Intent(context, VideoActivity::class.java).apply {
                 putExtra("fileBeanIndex", videoDate.index)
                 putExtra("bean", videoInfoBeanJson)
-                // 传入视频所在目录 cid，用于查找同目录字幕
-                putExtra("parentCid", fileViewModel.currentCid)
             }
             videoActivityLauncher.launch(intent)
         }
@@ -258,7 +256,11 @@ fun FileScreen(
 
     fun handleVideoClick(i: Int, fileBean: FileBean) {
         audioViewModel.pause()
-        fileViewModel.getVideoInfo(fileBean.pickCode, i, fileBean.name)
+        // pid 是文件真实父目录 id（搜索/筛选列表下也正确），回退到当前浏览目录 cid
+        fileViewModel.getVideoInfo(
+            fileBean.pickCode, i, fileBean.name,
+            fileBean.parentId.ifEmpty { fileViewModel.currentCid }
+        )
     }
 
     fun handleAudioClick(fileBean: FileBean) {

@@ -82,7 +82,9 @@ import github.zerorooot.nap511.util.ConfigKeyUtil
 import github.zerorooot.nap511.util.DataStoreUtil
 import github.zerorooot.nap511.util.SubtitleConvertUtil
 import github.zerorooot.nap511.util.UserSessionManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import okhttp3.Interceptor
 import okhttp3.MediaType
 import okhttp3.MediaType.Companion.toMediaType
@@ -252,15 +254,13 @@ class VideoActivity : AppCompatActivity() {
     private val cloudSubtitleCandidates = mutableStateListOf<FileBean>()
     private val onlineSubtitleCandidates = mutableStateListOf<XunleiSubtitleBean>()
     private var isSearchingOnline by mutableStateOf(false)
+    private var isSearchingCloud by mutableStateOf(false)
     private var searchError by mutableStateOf("")
     private var showSubtitleDialog by mutableStateOf(false)
     private var activeSubtitleName by mutableStateOf<String?>(null)
 
-    /** 视频所在目录的 cid，用于查找同目录字幕 */
-    private val videoParentCid: String by lazy {
-        // 视频解析模式返回 parent_id；m3u8 模式下由 FileScreen 通过 intent 传入
-        videoInfo.parentId.ifEmpty { intent.getStringExtra("parentCid") ?: "" }
-    }
+    /** 视频所在目录的 cid，用于查找同目录字幕（getVideoInfo 已把真实 pid 写入 VideoInfoBean.parentId） */
+    private val videoParentCid: String by lazy { videoInfo.parentId }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
@@ -591,7 +591,7 @@ class VideoActivity : AppCompatActivity() {
      * 2. 触发在线字幕搜索
      */
     private fun prepareSubtitleCandidates() {
-        if (videoParentCid.isNotEmpty() && cloudSubtitleCandidates.isEmpty()) {
+        if (videoParentCid.isNotEmpty() && cloudSubtitleCandidates.isEmpty() && !isSearchingCloud) {
             searchCloudSubtitles()
         }
         searchOnlineSubtitles()
@@ -603,20 +603,29 @@ class VideoActivity : AppCompatActivity() {
     private fun autoMatchCloudSubtitle() {
         if (videoParentCid.isEmpty()) return
         lifecycleScope.launch {
-            searchCloudSubtitles()
+            // 直接等待搜索完成后再取第一个候选
+            val result = subtitleRepository.searchCloudSubtitles(
+                videoParentCid, videoInfo.fileName
+            )
+            cloudSubtitleCandidates.clear()
+            cloudSubtitleCandidates.addAll(result)
             // 自动挂载第一个匹配的同目录字幕
-            val first = cloudSubtitleCandidates.firstOrNull() ?: return@launch
+            val first = result.firstOrNull() ?: return@launch
             loadCloudSubtitle(first, toastOnFail = false)
         }
     }
 
     private fun searchCloudSubtitles() {
+        // 避免并发搜索：进行中直接跳过
+        if (isSearchingCloud) return
+        isSearchingCloud = true
         lifecycleScope.launch {
             val result = subtitleRepository.searchCloudSubtitles(
                 videoParentCid, videoInfo.fileName
             )
             cloudSubtitleCandidates.clear()
             cloudSubtitleCandidates.addAll(result)
+            isSearchingCloud = false
         }
     }
 
@@ -676,21 +685,23 @@ class VideoActivity : AppCompatActivity() {
 
     /**
      * 把本地字幕文件（srt/ass/ssa/vtt）挂载到 GSY 播放器
-     * ass/ssa 会先转换为 srt
+     * ass/ssa 会先转换为 srt；文件读写放在 IO 线程，避免卡 UI
      */
-    private fun mountSubtitleFile(file: File): Boolean {
-        return runCatching {
-            val srtFile = SubtitleConvertUtil.convertToSrt(file, subtitleCacheDir)
-                ?: return false
-            val source = GSYSubtitleSource.Builder(
-                android.net.Uri.fromFile(srtFile).toString()
-            ).setLabel(file.name).build()
-            videoPlayer.setSubtitleSource(source)
-            true
-        }.onFailure {
-            XLog.e("挂载字幕失败: ${file.name}", it)
-        }.getOrDefault(false)
-    }
+    private suspend fun mountSubtitleFile(file: File): Boolean =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val srtFile = SubtitleConvertUtil.convertToSrt(file, subtitleCacheDir)
+                    ?: return@withContext false
+                val source = GSYSubtitleSource.Builder(
+                    android.net.Uri.fromFile(srtFile).toString()
+                ).setLabel(file.name).build()
+                // setSubtitleSource 内部仅做 UI 操作，切回主线程
+                withContext(Dispatchers.Main) { videoPlayer.setSubtitleSource(source) }
+                true
+            }.onFailure {
+                XLog.e("挂载字幕失败: ${file.name}", it)
+            }.getOrDefault(false)
+        }
 
     private fun clearSubtitle() {
         runCatching { videoPlayer.setSubtitleSource(null) }

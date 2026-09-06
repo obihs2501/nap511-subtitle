@@ -2,6 +2,8 @@ package github.zerorooot.nap511.util
 
 import com.elvishew.xlog.XLog
 import java.io.File
+import java.nio.charset.Charset
+import java.nio.charset.CodingErrorAction
 
 /**
  * 轻量字幕解析工具：把 srt / ass / ssa / vtt 统一转换为 GSYSubtitleCue 列表
@@ -150,8 +152,8 @@ object SubtitleConvertUtil {
             }
             // 严格 UTF-8 解码测试
             val decoder = Charsets.UTF_8.newDecoder()
-                .onMalformedInput(java.nio.charset.CodingError.REPORT)
-                .onUnmappableCharacter(java.nio.charset.CodingError.REPORT)
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT)
             decoder.decode(java.nio.ByteBuffer.wrap(bytes))
             Charsets.UTF_8
         }.getOrElse {

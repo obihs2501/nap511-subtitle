@@ -1,11 +1,11 @@
 package github.zerorooot.nap511.repository
 
 import com.google.gson.Gson
+import com.google.gson.JsonParser
 import com.elvishew.xlog.XLog
 import github.zerorooot.nap511.bean.FileBean
 import github.zerorooot.nap511.bean.FilesBean
 import github.zerorooot.nap511.bean.XunleiSubtitleBean
-import github.zerorooot.nap511.bean.XunleiSubtitleResponse
 import github.zerorooot.nap511.util.NetworkClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -43,6 +43,8 @@ class SubtitleRepository {
 
     /**
      * 通过迅雷接口搜索在线字幕
+     * 响应为包裹对象 {code, result, data:[...]}；做防御式解析，
+     * 兼容直接返回裸数组 [ {...}, ... ] 的历史形态
      */
     suspend fun searchOnlineSubtitles(videoName: String): List<XunleiSubtitleBean> {
         lastSearchFailed = false
@@ -54,9 +56,17 @@ class SubtitleRepository {
                 response.use {
                     if (!it.isSuccessful) throw IOException("迅雷字幕接口响应异常: ${it.code}")
                     val body = it.body.string()
-                    val result = gson.fromJson(body, XunleiSubtitleResponse::class.java)
-                    if (result.code != 0) throw IOException("迅雷字幕接口返回错误: ${result.code}")
-                    result.data
+                    val element = JsonParser.parseString(body)
+                    val items = when {
+                        element.isJsonArray -> element.asJsonArray
+                        element.isJsonObject && element.asJsonObject.has("data") &&
+                                element.asJsonObject.get("data").isJsonArray ->
+                            element.asJsonObject.getAsJsonArray("data")
+                        else -> throw IOException("迅雷字幕接口响应结构异常")
+                    }
+                    items.map { item ->
+                        gson.fromJson(item, XunleiSubtitleBean::class.java)
+                    }
                 }
             }.onFailure {
                 lastSearchFailed = true
@@ -67,7 +77,6 @@ class SubtitleRepository {
 
     /**
      * 在 115 网盘同目录中查找与视频匹配的字幕文件
-     * 匹配规则：去掉扩展名后，字幕文件名以视频文件名开头（或视频文件名以字幕文件名开头）
      */
     suspend fun searchCloudSubtitles(parentCid: String, videoName: String): List<FileBean> {
         return withContext(Dispatchers.IO) {
@@ -77,8 +86,10 @@ class SubtitleRepository {
                     limit = 1150
                 )
                 val videoBaseName = videoName.substringBeforeLast('.')
+                // Gson 原始数据里 isFolder 未被填充（formatFileBeanList 在 ViewModel 层才计算），
+                // 用 fileId 为空判断文件夹
                 filesBean.fileBeanList.filter { fileBean ->
-                    !fileBean.isFolder && isSubtitleFile(fileBean.name) && isNameMatch(
+                    fileBean.fileId.isNotEmpty() && isSubtitleFile(fileBean.name) && isNameMatch(
                         videoBaseName, fileBean.name.substringBeforeLast('.')
                     )
                 }
@@ -89,12 +100,19 @@ class SubtitleRepository {
     }
 
     /**
-     * 文件名匹配：字幕名与视频名去掉扩展名后，互为前缀（容忍 "video.chs.srt" 与 "video.mp4"）
+     * 文件名匹配：字幕名与视频名去掉扩展名后互为前缀，且剩余部分必须像
+     * 语言/标签后缀（.chs、.eng、简体、_1 等），避免 "a.mp4" 误配 "avatar.chs.srt"
      */
     private fun isNameMatch(videoBaseName: String, subtitleBaseName: String): Boolean {
         val v = videoBaseName.lowercase()
         val s = subtitleBaseName.lowercase()
-        return s.startsWith(v) || v.startsWith(s)
+        if (v == s) return true
+        val longer = if (s.length > v) s else v
+        val shorter = if (s.length > v) v else s
+        if (!longer.startsWith(shorter)) return false
+        // 剩余部分以分隔符开头（. _ - 空格），视为同一文件的不同标签版本
+        val rest = longer.substring(shorter.length)
+        return rest.firstOrNull()?.isLetterOrDigit() != true
     }
 
     fun isSubtitleFile(fileName: String): Boolean {
