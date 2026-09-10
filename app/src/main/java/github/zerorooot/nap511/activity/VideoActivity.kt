@@ -55,7 +55,9 @@ import androidx.media3.datasource.TransferListener
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.MediaSource
-import androidx.activity.compose.setContent
+import android.view.ViewGroup
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.getValue
@@ -314,7 +316,20 @@ class VideoActivity : AppCompatActivity() {
         }
 
         // 挂载 Compose 字幕选择弹窗
-        setContent {
+        // 注意：不能调用 Activity.setContent()，它会用一个空 ComposeView 整体替换掉
+        // setContentView 装入的播放器布局，导致播放器从未挂到窗口上（白屏、无控件、只剩声音）。
+        // 这里把 ComposeView 作为兄弟视图叠加在内容层之上，仅承载字幕对话框。
+        val subtitleComposeView = ComposeView(this).apply {
+            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+        }
+        findViewById<ViewGroup>(android.R.id.content).addView(
+            subtitleComposeView,
+            ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        )
+        subtitleComposeView.setContent {
             val dynamicColor by DataStoreUtil.getDataFlow(ConfigKeyUtil.DYNAMIC_COLOR, true)
                 .collectAsStateWithLifecycle(initialValue = true)
             val themeMode by DataStoreUtil.getDataFlow(ConfigKeyUtil.THEME_MODE, "跟随系统")
