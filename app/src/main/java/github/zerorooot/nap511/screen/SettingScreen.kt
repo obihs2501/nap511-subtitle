@@ -41,6 +41,8 @@ import github.zerorooot.nap511.screenitem.PreferenceItem
 import github.zerorooot.nap511.screenitem.SwitchPreferenceItem
 import github.zerorooot.nap511.util.App
 import github.zerorooot.nap511.util.ConfigKeyUtil
+import github.zerorooot.nap511.util.DataStoreUtil
+import github.zerorooot.nap511.util.SubtitleStyleUtil
 import github.zerorooot.nap511.util.UserSessionManager
 import github.zerorooot.nap511.viewmodel.SettingViewModel
 import my.nanihadesuka.compose.LazyColumnScrollbar
@@ -335,6 +337,76 @@ fun SettingContent(
                         summary = "视频缓冲加载时隐藏居中的加载动画",
                         checked = uiState.hideLoadingView,
                         onCheckedChange = { onSaveConfig(ConfigKeyUtil.HIDE_LOADING_VIEW, it) }
+                    )
+                }
+
+                // --- 字幕样式 ---
+                item { PreferenceCategoryHeader("字幕样式") }
+                item {
+                    val size by DataStoreUtil.getDataFlow(
+                        ConfigKeyUtil.SUBTITLE_TEXT_SIZE, SubtitleStyleUtil.DEFAULT_SIZE
+                    ).collectAsStateWithLifecycle(initialValue = SubtitleStyleUtil.DEFAULT_SIZE)
+                    ListPreferenceItem(
+                        title = "字幕字号",
+                        value = "$size sp",
+                        entries = SubtitleStyleUtil.SIZE_ENTRIES,
+                        entryValues = SubtitleStyleUtil.SIZE_ENTRIES,
+                        onValueSave = {
+                            onSaveConfig(ConfigKeyUtil.SUBTITLE_TEXT_SIZE, SubtitleStyleUtil.sizeFromEntry(it))
+                        }
+                    )
+                }
+                item {
+                    val color by DataStoreUtil.getDataFlow(
+                        ConfigKeyUtil.SUBTITLE_TEXT_COLOR, SubtitleStyleUtil.DEFAULT_COLOR
+                    ).collectAsStateWithLifecycle(initialValue = SubtitleStyleUtil.DEFAULT_COLOR)
+                    ListPreferenceItem(
+                        title = "字幕颜色",
+                        value = SubtitleStyleUtil.colorName(color),
+                        entries = SubtitleStyleUtil.COLOR_NAMES,
+                        entryValues = SubtitleStyleUtil.COLOR_NAMES,
+                        onValueSave = {
+                            onSaveConfig(ConfigKeyUtil.SUBTITLE_TEXT_COLOR, SubtitleStyleUtil.colorFromName(it))
+                        }
+                    )
+                }
+                item {
+                    val font by DataStoreUtil.getDataFlow(
+                        ConfigKeyUtil.SUBTITLE_FONT, SubtitleStyleUtil.DEFAULT_FONT
+                    ).collectAsStateWithLifecycle(initialValue = SubtitleStyleUtil.DEFAULT_FONT)
+                    ListPreferenceItem(
+                        title = "字幕字体",
+                        value = SubtitleStyleUtil.fontName(font),
+                        entries = SubtitleStyleUtil.FONT_NAMES,
+                        entryValues = SubtitleStyleUtil.FONT_NAMES,
+                        onValueSave = {
+                            onSaveConfig(ConfigKeyUtil.SUBTITLE_FONT, SubtitleStyleUtil.fontKeyFromName(it))
+                        }
+                    )
+                }
+                item {
+                    val bold by DataStoreUtil.getDataFlow(ConfigKeyUtil.SUBTITLE_BOLD, false)
+                        .collectAsStateWithLifecycle(initialValue = false)
+                    SwitchPreferenceItem(
+                        title = "字幕粗体",
+                        checked = bold,
+                        onCheckedChange = { onSaveConfig(ConfigKeyUtil.SUBTITLE_BOLD, it) }
+                    )
+                }
+                item {
+                    val bg by DataStoreUtil.getDataFlow(ConfigKeyUtil.SUBTITLE_BACKGROUND, false)
+                        .collectAsStateWithLifecycle(initialValue = false)
+                    SwitchPreferenceItem(
+                        title = "字幕半透明底色",
+                        summary = "在字幕后加一层半透明黑色，提升亮场景可读性",
+                        checked = bg,
+                        onCheckedChange = { onSaveConfig(ConfigKeyUtil.SUBTITLE_BACKGROUND, it) }
+                    )
+                }
+                item {
+                    PreferenceItem(
+                        title = "字幕延迟 / 同步",
+                        summary = "播放时点击「字幕」→「样式与同步」实时调节，每次播放自动归零"
                     )
                 }
 

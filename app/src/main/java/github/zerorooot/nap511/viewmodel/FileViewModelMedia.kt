@@ -93,7 +93,12 @@ internal fun FileViewModel.updateVideoFileBean(
     }
 }
 
-internal fun FileViewModel.getVideoInfo(pickCode: String, fileBeanIndex: Int, fileName: String) {
+internal fun FileViewModel.getVideoInfo(
+    pickCode: String,
+    fileBeanIndex: Int,
+    fileName: String,
+    parentCid: String = ""
+) {
     viewModelScope.launch {
         val isAutoRotate = DataStoreUtil.getDataSuspend(ConfigKeyUtil.AUTO_ROTATE, false)
         val videoLinkMode = DataStoreUtil.getDataSuspend(ConfigKeyUtil.VIDEO_LINK_MODE, false)
@@ -114,6 +119,7 @@ internal fun FileViewModel.getVideoInfo(pickCode: String, fileBeanIndex: Int, fi
                     index = fileBeanIndex,
                     fileName = fileName,
                     pickCode = pickCode,
+                    parentId = parentCid,
                     videoUrl = "http://115.com/api/video/m3u8/${pickCode}.m3u8"
                 )
             }

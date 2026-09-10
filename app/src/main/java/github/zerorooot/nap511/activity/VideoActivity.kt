@@ -3,12 +3,14 @@ package github.zerorooot.nap511.activity
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.os.Bundle
 import android.view.View
 import android.widget.Toast
 import androidx.activity.addCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 import androidx.annotation.OptIn
 import androidx.appcompat.app.AppCompatActivity
@@ -55,21 +57,41 @@ import androidx.media3.datasource.TransferListener
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.MediaSource
+import android.view.ViewGroup
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.ViewCompositionStrategy
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.elvishew.xlog.XLog
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.shuyu.gsyvideoplayer.GSYVideoManager
 import com.shuyu.gsyvideoplayer.listener.GSYSampleCallBack
 import com.shuyu.gsyvideoplayer.player.PlayerFactory
+import com.shuyu.gsyvideoplayer.subtitle.GSYSubtitleSource
 import github.zerorooot.nap511.R
+import github.zerorooot.nap511.bean.FileBean
+import github.zerorooot.nap511.bean.SubtitleBrowseState
+import github.zerorooot.nap511.bean.SubtitleStyleState
 import github.zerorooot.nap511.bean.VideoInfoBean
+import github.zerorooot.nap511.bean.XunleiSubtitleBean
+import github.zerorooot.nap511.dialog.SubtitlePickerDialog
 import github.zerorooot.nap511.player.MyGSYVideoPlayer
 import github.zerorooot.nap511.repository.FileRepository
+import github.zerorooot.nap511.repository.SubtitleRepository
+import github.zerorooot.nap511.ui.theme.Nap511Theme
 import github.zerorooot.nap511.util.App
 import github.zerorooot.nap511.util.ConfigKeyUtil
 import github.zerorooot.nap511.util.DataStoreUtil
+import github.zerorooot.nap511.util.SubtitleConvertUtil
+import github.zerorooot.nap511.util.SubtitleStyleUtil
 import github.zerorooot.nap511.util.UserSessionManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import okhttp3.Interceptor
 import okhttp3.MediaType
 import okhttp3.MediaType.Companion.toMediaType
@@ -231,6 +253,35 @@ class VideoActivity : AppCompatActivity() {
     private var videoLinkMode = false
     private var autoJumpRetry = true
 
+    // ------------------- 字幕相关 -------------------
+    private val subtitleRepository by lazy { SubtitleRepository.getInstance() }
+    private val subtitleCacheDir: File by lazy {
+        File(cacheDir, "subtitles").apply { if (!exists()) mkdirs() }
+    }
+    private val cloudSubtitleCandidates = mutableStateListOf<FileBean>()
+    private val onlineSubtitleCandidates = mutableStateListOf<XunleiSubtitleBean>()
+    private var isSearchingOnline by mutableStateOf(false)
+    private var isSearchingCloud by mutableStateOf(false)
+    private var searchError by mutableStateOf("")
+    private var showSubtitleDialog by mutableStateOf(false)
+    private var activeSubtitleName by mutableStateOf<String?>(null)
+
+    /** 字幕样式（持久化）与延迟（仅本次播放） */
+    private var subtitleStyle by mutableStateOf(SubtitleStyleState())
+    private var subtitleDelayMs by mutableStateOf(0L)
+
+    /** 网盘字幕浏览状态 */
+    private var browseState by mutableStateOf(SubtitleBrowseState())
+
+    /** 本机字幕文件选择器：srt/ass 的 MIME 各家不一，用通配 MIME 打开选择器，再按扩展名校验 */
+    private val localSubtitlePicker =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+            if (uri != null) loadLocalSubtitle(uri)
+        }
+
+    /** 视频所在目录的 cid，用于查找同目录字幕（getVideoInfo 已把真实 pid 写入 VideoInfoBean.parentId） */
+    private val videoParentCid: String by lazy { videoInfo.parentId }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
@@ -239,6 +290,9 @@ class VideoActivity : AppCompatActivity() {
             autoJumpRetry = DataStoreUtil.getDataSuspend(ConfigKeyUtil.AUTO_JUMP_RETRY, true)
             val hideLoading = DataStoreUtil.getDataSuspend(ConfigKeyUtil.HIDE_LOADING_VIEW, false)
             videoPlayer.setHideLoadingView(hideLoading)
+            // 读取并应用字幕样式
+            subtitleStyle = SubtitleStyleUtil.load()
+            applySubtitleStyle(subtitleStyle)
         }
         setContentView(R.layout.activity_video)
         val headerMap = hashMapOf(
@@ -271,8 +325,96 @@ class VideoActivity : AppCompatActivity() {
             backButton.setOnClickListener {
                 back()
             }
+            //字幕选择入口
+            findViewById<View>(R.id.subtitleButton).setOnClickListener {
+                showSubtitleDialog = true
+                prepareSubtitleCandidates()
+            }
+            findViewById<View>(R.id.subtitleButtonFullscreen).setOnClickListener {
+                showSubtitleDialog = true
+                prepareSubtitleCandidates()
+            }
         }
 
+        // 挂载 Compose 字幕选择弹窗
+        // 注意：不能调用 Activity.setContent()，它会用一个空 ComposeView 整体替换掉
+        // setContentView 装入的播放器布局，导致播放器从未挂到窗口上（白屏、无控件、只剩声音）。
+        // 这里把 ComposeView 作为兄弟视图叠加在内容层之上，仅承载字幕对话框。
+        val subtitleComposeView = ComposeView(this).apply {
+            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+        }
+        findViewById<ViewGroup>(android.R.id.content).addView(
+            subtitleComposeView,
+            ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        )
+        subtitleComposeView.setContent {
+            val dynamicColor by DataStoreUtil.getDataFlow(ConfigKeyUtil.DYNAMIC_COLOR, true)
+                .collectAsStateWithLifecycle(initialValue = true)
+            val themeMode by DataStoreUtil.getDataFlow(ConfigKeyUtil.THEME_MODE, "跟随系统")
+                .collectAsStateWithLifecycle(initialValue = "跟随系统")
+            val darkTheme = when (themeMode) {
+                "亮色模式" -> false
+                "暗色模式" -> true
+                else -> androidx.compose.foundation.isSystemInDarkTheme()
+            }
+            Nap511Theme(darkTheme = darkTheme, dynamicColor = dynamicColor) {
+                if (showSubtitleDialog) {
+                    SubtitlePickerDialog(
+                        cloudSubtitles = cloudSubtitleCandidates,
+                        onlineSubtitles = onlineSubtitleCandidates,
+                        isSearchingOnline = isSearchingOnline,
+                        searchError = searchError,
+                        selectedSubtitleName = activeSubtitleName,
+                        style = subtitleStyle,
+                        delayMs = subtitleDelayMs,
+                        browse = browseState,
+                        onDismiss = {
+                            showSubtitleDialog = false
+                            browseState = browseState.copy(active = false)
+                        },
+                        onSelectCloudSubtitle = { fileBean ->
+                            showSubtitleDialog = false
+                            loadCloudSubtitle(fileBean)
+                        },
+                        onSelectOnlineSubtitle = { bean ->
+                            showSubtitleDialog = false
+                            loadOnlineSubtitle(bean)
+                        },
+                        onClearSubtitle = {
+                            showSubtitleDialog = false
+                            clearSubtitle()
+                        },
+                        onRetrySearch = { prepareSubtitleCandidates() },
+                        onStyleChange = { newStyle, persist ->
+                            subtitleStyle = newStyle
+                            applySubtitleStyle(newStyle)
+                            if (persist) {
+                                lifecycleScope.launch { SubtitleStyleUtil.save(newStyle) }
+                            }
+                        },
+                        onDelayChange = { ms ->
+                            subtitleDelayMs = ms
+                            applySubtitleDelay(ms)
+                        },
+                        onBrowseStart = { startBrowse() },
+                        onBrowseOpenFolder = { cid -> openBrowseFolder(cid) },
+                        onBrowseUp = { browseUp() },
+                        onBrowseExit = { browseState = browseState.copy(active = false) },
+                        onPickLocalSubtitle = {
+                            showSubtitleDialog = false
+                            browseState = browseState.copy(active = false)
+                            localSubtitlePicker.launch(arrayOf("*/*"))
+                        }
+                    )
+                }
+            }
+        }
+
+        // 启动时自动匹配云盘同目录字幕（在播放器启动后执行）
+        autoMatchCloudSubtitle()
 
         videoPlayer.startPlayLogic()
 
@@ -503,4 +645,209 @@ class VideoActivity : AppCompatActivity() {
         )
     }
 
+    // ======================= 字幕逻辑 =======================
+
+    /**
+     * 打开字幕弹窗时准备候选列表：
+     * 1. 同目录字幕（首次进入时查询）
+     * 2. 触发在线字幕搜索
+     */
+    private fun prepareSubtitleCandidates() {
+        if (videoParentCid.isNotEmpty() && cloudSubtitleCandidates.isEmpty() && !isSearchingCloud) {
+            searchCloudSubtitles()
+        }
+        searchOnlineSubtitles()
+    }
+
+    /**
+     * 自动匹配同目录字幕并默认加载
+     */
+    private fun autoMatchCloudSubtitle() {
+        if (videoParentCid.isEmpty()) return
+        lifecycleScope.launch {
+            // 直接等待搜索完成后再取第一个候选
+            val result = subtitleRepository.searchCloudSubtitles(
+                videoParentCid, videoInfo.fileName
+            )
+            cloudSubtitleCandidates.clear()
+            cloudSubtitleCandidates.addAll(result)
+            // 自动挂载第一个匹配的同目录字幕
+            val first = result.firstOrNull() ?: return@launch
+            loadCloudSubtitle(first, toastOnFail = false)
+        }
+    }
+
+    private fun searchCloudSubtitles() {
+        // 避免并发搜索：进行中直接跳过
+        if (isSearchingCloud) return
+        isSearchingCloud = true
+        lifecycleScope.launch {
+            val result = subtitleRepository.searchCloudSubtitles(
+                videoParentCid, videoInfo.fileName
+            )
+            cloudSubtitleCandidates.clear()
+            cloudSubtitleCandidates.addAll(result)
+            isSearchingCloud = false
+        }
+    }
+
+    private fun searchOnlineSubtitles() {
+        if (isSearchingOnline) return
+        isSearchingOnline = true
+        searchError = ""
+        lifecycleScope.launch {
+            val result = subtitleRepository.searchOnlineSubtitles(videoInfo.fileName)
+            onlineSubtitleCandidates.clear()
+            onlineSubtitleCandidates.addAll(result)
+            if (result.isEmpty()) {
+                searchError = if (subtitleRepository.lastSearchFailed) {
+                    "在线字幕搜索失败，请检查网络"
+                } else {
+                    ""
+                }
+            }
+            isSearchingOnline = false
+        }
+    }
+
+    /**
+     * 加载 115 云盘同目录字幕：下载 -> 转换 -> 挂载
+     */
+    private fun loadCloudSubtitle(fileBean: FileBean, toastOnFail: Boolean = true) {
+        lifecycleScope.launch {
+            val localFile = subtitleRepository.downloadCloudSubtitle(fileBean, subtitleCacheDir)
+            val mounted = localFile != null && mountSubtitleFile(localFile)
+            if (mounted) {
+                activeSubtitleName = fileBean.name
+                App.instance.toast("字幕已挂载: ${fileBean.name}")
+            } else {
+                if (toastOnFail) App.instance.toast("字幕挂载失败")
+                XLog.e("云盘字幕挂载失败: ${fileBean.name}")
+            }
+        }
+    }
+
+    /**
+     * 加载迅雷在线字幕：下载 -> 转换 -> 挂载
+     */
+    private fun loadOnlineSubtitle(bean: XunleiSubtitleBean) {
+        lifecycleScope.launch {
+            val localFile = subtitleRepository.downloadSubtitle(
+                bean.url, bean.name, subtitleCacheDir
+            )
+            val mounted = localFile != null && mountSubtitleFile(localFile)
+            if (mounted) {
+                activeSubtitleName = bean.name
+                App.instance.toast("字幕已挂载: ${bean.name}")
+            } else {
+                App.instance.toast("字幕下载或解析失败")
+            }
+        }
+    }
+
+    /**
+     * 把本地字幕文件（srt/ass/ssa/vtt）挂载到 GSY 播放器
+     * ass/ssa 会先转换为 srt；文件读写放在 IO 线程，避免卡 UI
+     */
+    private suspend fun mountSubtitleFile(file: File): Boolean =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val srtFile = SubtitleConvertUtil.convertToSrt(file, subtitleCacheDir)
+                    ?: return@withContext false
+                val source = GSYSubtitleSource.Builder(
+                    android.net.Uri.fromFile(srtFile).toString()
+                ).setLabel(file.name).build()
+                // setSubtitleSource 内部仅做 UI 操作，切回主线程
+                withContext(Dispatchers.Main) {
+                    videoPlayer.setSubtitleSource(source)
+                    // 字幕控制器可能被重建，重新套用样式与延迟
+                    applySubtitleStyle(subtitleStyle)
+                    applySubtitleDelay(subtitleDelayMs)
+                }
+                true
+            }.onFailure {
+                XLog.e("挂载字幕失败: ${file.name}", it)
+            }.getOrDefault(false)
+        }
+
+    /** 应用字幕样式：字号/颜色/底色走 GSYSubtitleStyle，字体直接设到字幕 TextView */
+    private fun applySubtitleStyle(style: SubtitleStyleState) {
+        runCatching {
+            videoPlayer.setSubtitleStyle(SubtitleStyleUtil.toGsyStyle(style))
+            videoPlayer.applySubtitleTypeface(SubtitleStyleUtil.toTypeface(style))
+        }.onFailure { XLog.e("应用字幕样式失败", it) }
+    }
+
+    /**
+     * 字幕延迟：UI 语义为正值=字幕推后显示。
+     * GSY 的 offset 语义相反（sourcePosition = position + offset，正值=提前），故取负。
+     */
+    private fun applySubtitleDelay(delayMs: Long) {
+        runCatching { videoPlayer.setSubtitleOffsetMs(-delayMs) }
+            .onFailure { XLog.e("设置字幕延迟失败", it) }
+    }
+
+    // ---------------- 网盘目录浏览 ----------------
+
+    private fun startBrowse() {
+        openBrowseFolder(videoParentCid.ifEmpty { "0" })
+    }
+
+    private fun openBrowseFolder(cid: String) {
+        browseState = browseState.copy(active = true, loading = true, error = "")
+        lifecycleScope.launch {
+            runCatching { subtitleRepository.listFolder(cid) }
+                .onSuccess { listing ->
+                    val matched = listing.subtitles
+                        .filter { subtitleRepository.matchesVideo(videoInfo.fileName, it.name) }
+                        .map { it.fileId }
+                        .toSet()
+                    browseState = SubtitleBrowseState(
+                        active = true,
+                        loading = false,
+                        cid = cid,
+                        path = listing.path,
+                        folders = listing.folders,
+                        subtitles = listing.subtitles,
+                        matched = matched
+                    )
+                }
+                .onFailure {
+                    XLog.e("浏览网盘目录失败: $cid", it)
+                    browseState = browseState.copy(
+                        loading = false,
+                        error = "目录加载失败: ${it.localizedMessage ?: "未知错误"}"
+                    )
+                }
+        }
+    }
+
+    /** 面包屑最后一项为当前目录，倒数第二项即上级 */
+    private fun browseUp() {
+        val path = browseState.path
+        if (path.size >= 2) openBrowseFolder(path[path.size - 2].cid)
+    }
+
+    // ---------------- 本机字幕 ----------------
+
+    private fun loadLocalSubtitle(uri: Uri) {
+        lifecycleScope.launch {
+            val file = subtitleRepository.importLocalSubtitle(applicationContext, uri, subtitleCacheDir)
+            if (file == null) {
+                App.instance.toast("无法读取所选字幕（仅支持 srt/ass/ssa/vtt）")
+                return@launch
+            }
+            if (mountSubtitleFile(file)) {
+                activeSubtitleName = file.name
+                App.instance.toast("字幕已挂载: ${file.name}")
+            } else {
+                App.instance.toast("字幕解析失败")
+            }
+        }
+    }
+
+    private fun clearSubtitle() {
+        runCatching { videoPlayer.setSubtitleSource(null) }
+        activeSubtitleName = null
+    }
 }
