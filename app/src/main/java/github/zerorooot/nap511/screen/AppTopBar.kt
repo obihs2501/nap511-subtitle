@@ -1,8 +1,17 @@
 package github.zerorooot.nap511.screen
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -22,13 +31,13 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.Search
-import androidx.compose.foundation.layout.WindowInsetsSides
-import androidx.compose.foundation.layout.only
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
@@ -41,23 +50,34 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
-import github.zerorooot.nap511.ui.theme.Typography
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AppTopBarNormal(title: String, onClick: (name: String) -> Unit) {
-//    val contextForToast = LocalContext.current.applicationContext
+fun BaseTopAppBar(
+    title: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+    navigationIcon: @Composable () -> Unit = {},
+    actions: @Composable RowScope.() -> Unit = {},
+) {
     TopAppBar(
+        title = title,
+        modifier = modifier,
+        navigationIcon = navigationIcon,
+        actions = actions,
         windowInsets = TopAppBarDefaults.windowInsets.only(WindowInsetsSides.Top),
-        title = {
-            Text(text = title)
-        },
         colors = TopAppBarDefaults.topAppBarColors(
             containerColor = MaterialTheme.colorScheme.primaryContainer,
             titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
             navigationIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
             actionIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer
-        ),
+        )
+    )
+}
+
+@Composable
+fun AppTopBarNormal(title: String, onClick: (name: String) -> Unit) {
+    BaseTopAppBar(
+        title = { Text(text = title) },
         navigationIcon = {
             // 主界面用汉堡按钮打开 Drawer（返回由系统 Back 或二级页面再触发）
             TopAppBarActionButton(
@@ -68,7 +88,6 @@ fun AppTopBarNormal(title: String, onClick: (name: String) -> Unit) {
             }
         },
         actions = {
-            // search icon
             TopAppBarActionButton(
                 imageVector = Icons.Rounded.Search,
                 description = "Search"
@@ -82,20 +101,14 @@ fun AppTopBarNormal(title: String, onClick: (name: String) -> Unit) {
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AppTopBarMultiple(title: String, onClick: (String) -> Unit) {
-    TopAppBar(
-        windowInsets = TopAppBarDefaults.windowInsets.only(WindowInsetsSides.Top),
-        title = {
-            Text(text = title)
-        },
-        colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-            navigationIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-            actionIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer
-        ),
+fun AppTopBarMultiple(
+    title: String,
+    isExpandedScreen: Boolean = false,
+    onClick: (String) -> Unit
+) {
+    BaseTopAppBar(
+        title = { Text(text = title) },
         navigationIcon = {
             IconButton(onClick = { onClick.invoke("back") }) {
                 Icon(
@@ -105,76 +118,112 @@ fun AppTopBarMultiple(title: String, onClick: (String) -> Unit) {
             }
         },
         actions = {
-            TopAppBarActionButton(
-                Icons.Default.ArrowUpward,
-                description = "up"
-            ) {
-                onClick.invoke("selectToUp")
+            if (isExpandedScreen) {
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState())
+                ) {
+                    TopAppBarActionTextButton(
+                        imageVector = Icons.Default.ArrowUpward,
+                        label = "向上选",
+                        onClick = { onClick.invoke("selectToUp") }
+                    )
+                    TopAppBarActionTextButton(
+                        imageVector = Icons.Default.ArrowDownward,
+                        label = "向下选",
+                        onClick = { onClick.invoke("selectToDown") }
+                    )
+                    TopAppBarActionTextButton(
+                        imageVector = Icons.Default.ContentCut,
+                        label = "剪切",
+                        onClick = { onClick.invoke("cut") }
+                    )
+                    TopAppBarActionTextButton(
+                        imageVector = Icons.Default.Delete,
+                        label = "删除",
+                        onClick = { onClick.invoke("delete") }
+                    )
+                    TopAppBarActionTextButton(
+                        imageVector = Icons.Default.SelectAll,
+                        label = "反选",
+                        onClick = { onClick.invoke("selectReverse") }
+                    )
+                    TopAppBarActionTextButton(
+                        imageVector = Icons.Default.Cloud,
+                        label = "解压",
+                        onClick = { onClick.invoke("unzipAllFile") }
+                    )
+                }
+            } else {
+                TopAppBarActionButton(
+                    Icons.Default.ArrowUpward,
+                    description = "up"
+                ) {
+                    onClick.invoke("selectToUp")
+                }
+                TopAppBarActionButton(
+                    Icons.Default.ArrowDownward,
+                    description = "down"
+                ) {
+                    onClick.invoke("selectToDown")
+                }
+                TopAppBarActionButton(
+                    Icons.Default.ContentCut,
+                    description = "Cut"
+                ) {
+                    onClick.invoke("cut")
+                }
+                TopAppBarActionButton(
+                    Icons.Default.Delete,
+                    description = "delete"
+                ) {
+                    onClick.invoke("delete")
+                }
+                TopAppBarActionButton(
+                    Icons.Default.SelectAll,
+                    description = "ic_baseline_select_reverse_24"
+                ) {
+                    onClick.invoke("selectReverse")
+                }
+                TopAppBarActionButton(
+                    Icons.Default.Cloud,
+                    description = "unzip file"
+                ) {
+                    onClick.invoke("unzipAllFile")
+                }
             }
-            TopAppBarActionButton(
-                Icons.Default.ArrowDownward,
-                description = "down"
-            ) {
-                onClick.invoke("selectToDown")
-            }
-            // cut icon
-            TopAppBarActionButton(
-                Icons.Default.ContentCut,
-                description = "Cut"
-            ) {
-                onClick.invoke("cut")
-            }
-
-            TopAppBarActionButton(
-                Icons.Default.Delete,
-                description = "delete"
-            ) {
-                onClick.invoke("delete")
-            }
-//            TopAppBarActionButton(
-//                painter = painterResource(id = R.drawable.ic_baseline_select_all_24),
-//                description = "ic_baseline_select_all_24"
-//            ) {
-//                onClick.invoke("selectAll")
-//            }
-            TopAppBarActionButton(
-                Icons.Default.SelectAll,
-                description = "ic_baseline_select_reverse_24"
-            ) {
-                onClick.invoke("selectReverse")
-            }
-            //R.drawable.baseline_cloud_download_24
-            TopAppBarActionButton(
-                Icons.Default.Cloud,
-                description = "unzip file"
-            ) {
-                onClick.invoke("unzipAllFile")
-            }
-//            TopAppBarActionButton(
-//                painter = painterResource(id = R.drawable.baseline_close_24),
-//                description = "ic_baseline_select_all_24"
-//            ) {
-//                onClick.invoke("close")
-//            }
         }
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TopAppBarActionTextButton(
+    imageVector: ImageVector,
+    label: String,
+    onClick: () -> Unit
+) {
+    TextButton(
+        onClick = onClick,
+        colors = ButtonDefaults.textButtonColors(
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+        )
+    ) {
+        Icon(
+            imageVector = imageVector,
+            contentDescription = label,
+            modifier = Modifier.size(20.dp)
+        )
+        Spacer(modifier = Modifier.width(4.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelLarge
+        )
+    }
+}
+
 @Composable
 fun AppTopBarOfflineFile(title: String, onClick: (name: String) -> Unit) {
-//    val contextForToast = LocalContext.current.applicationContext
-    TopAppBar(
-        windowInsets = TopAppBarDefaults.windowInsets.only(WindowInsetsSides.Top),
-        title = {
-            Text(text = title)
-        },
-        colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-            navigationIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-            actionIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer
-        ),
+    BaseTopAppBar(
+        title = { Text(text = title) },
         navigationIcon = {
             TopAppBarActionButton(
                 imageVector = Icons.Rounded.Menu,
@@ -191,21 +240,10 @@ fun AppTopBarOfflineFile(title: String, onClick: (name: String) -> Unit) {
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppTopBarLogScreen(title: String, onClick: (name: String) -> Unit) {
-//    val contextForToast = LocalContext.current.applicationContext
-    TopAppBar(
-        windowInsets = TopAppBarDefaults.windowInsets.only(WindowInsetsSides.Top),
-        title = {
-            Text(text = title)
-        },
-        colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-            navigationIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-            actionIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer
-        ),
+    BaseTopAppBar(
+        title = { Text(text = title) },
         navigationIcon = {
             TopAppBarActionButton(
                 imageVector = Icons.Rounded.Menu,
@@ -228,20 +266,10 @@ fun AppTopBarLogScreen(title: String, onClick: (name: String) -> Unit) {
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppTopBarRepeatFile(title: String, onClick: (name: String) -> Unit) {
-    TopAppBar(
-        windowInsets = TopAppBarDefaults.windowInsets.only(WindowInsetsSides.Top),
-        title = {
-            Text(text = title)
-        },
-        colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-            navigationIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-            actionIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer
-        ),
+    BaseTopAppBar(
+        title = { Text(text = title) },
         navigationIcon = {
             TopAppBarActionButton(
                 imageVector = Icons.Rounded.Menu,
@@ -258,20 +286,10 @@ fun AppTopBarRepeatFile(title: String, onClick: (name: String) -> Unit) {
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppTopBarRecycle(title: String, onClick: (name: String) -> Unit) {
-    TopAppBar(
-        windowInsets = TopAppBarDefaults.windowInsets.only(WindowInsetsSides.Top),
-        title = {
-            Text(text = title)
-        },
-        colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-            navigationIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-            actionIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer
-        ),
+    BaseTopAppBar(
+        title = { Text(text = title) },
         navigationIcon = {
             TopAppBarActionButton(
                 imageVector = Icons.Rounded.Menu,
@@ -307,12 +325,9 @@ fun TopAppBarActionButton(
         if (painter != null) {
             Icon(painter = painter, contentDescription = description)
         }
-
     }
 }
 
-
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TopAppBarTxtReaderNormal(
     title: String,
@@ -325,8 +340,7 @@ fun TopAppBarTxtReaderNormal(
     onSettingsClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    TopAppBar(
-        windowInsets = TopAppBarDefaults.windowInsets.only(WindowInsetsSides.Top),
+    BaseTopAppBar(
         modifier = modifier,
         title = {
             Column {
@@ -363,17 +377,10 @@ fun TopAppBarTxtReaderNormal(
             IconButton(onClick = onSettingsClick) {
                 Icon(Icons.Default.Settings, contentDescription = "阅读设置")
             }
-        },
-        colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-            navigationIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-            actionIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer
-        )
+        }
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TopAppBarSearch(
     searchQuery: String,
@@ -387,8 +394,7 @@ fun TopAppBarSearch(
     placeholderText: String = "搜索...",
     focusRequester: FocusRequester
 ) {
-    TopAppBar(
-        windowInsets = TopAppBarDefaults.windowInsets.only(WindowInsetsSides.Top),
+    BaseTopAppBar(
         modifier = modifier,
         title = {
             TextField(
@@ -432,17 +438,10 @@ fun TopAppBarSearch(
             ) {
                 Icon(Icons.Default.KeyboardArrowDown, contentDescription = "下一个")
             }
-        },
-        colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-            navigationIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-            actionIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer
-        )
+        }
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TopAppBarTxtReaderSearch(
     searchQuery: String,
@@ -468,4 +467,3 @@ fun TopAppBarTxtReaderSearch(
         focusRequester = focusRequester
     )
 }
-

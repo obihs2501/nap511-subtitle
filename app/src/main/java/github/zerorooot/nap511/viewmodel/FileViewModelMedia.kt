@@ -41,7 +41,7 @@ internal fun FileViewModel.getImage(fileBeanList: List<FileBean>, indexOf: Int) 
             newMap[indexOf] = imageBean
 
             imageBeanCache[currentCid] = newMap
-        }.onFailureToastAndLog(tag = "FileViewModelMedia")
+        }.onFailureToastAndLog()
     }
 }
 
@@ -89,7 +89,7 @@ internal fun FileViewModel.updateVideoFileBean(
             }else{
                 XLog.d("更新视频时间 $videoHistory")
             }
-        }.onFailureToastAndLog(tag = "FileViewModelMedia")
+        }.onFailureToastAndLog()
     }
 }
 
@@ -125,12 +125,15 @@ internal fun FileViewModel.getVideoInfo(
             }
             XLog.d("FileViewModel getVideoInfo $video")
             _launchVideoEvent.emit(video)
-        }.onFailureToastAndLog(tag = "FileViewModelMedia")
+        }.onFailureToastAndLog()
         setRefreshingStatus(false)
     }
 }
 
-internal fun FileViewModel.downloadText(fileBean: FileBean, onNav: (Route) -> Unit) {
+internal fun FileViewModel.downloadSmallFile(
+    fileBean: FileBean,
+    onSuccess: (ByteArray) -> Unit
+) {
     viewModelScope.launch(Dispatchers.IO) {
         var bytes = textFileCache[fileBean]
         if (bytes == null) {
@@ -139,20 +142,33 @@ internal fun FileViewModel.downloadText(fileBean: FileBean, onNav: (Route) -> Un
                     fileRepository.getDownloadInputStream(fileBean.pickCode, fileBean.fileId)
                 if (downloadInputStream == null) {
                     setRefreshingStatus(false)
-                    App.instance.toast("文本加载失败！")
+                    App.instance.toast("文件加载失败！")
                     return@launch
                 }
                 bytes = downloadInputStream.readBytes()
                 textFileCache[fileBean] = bytes
-            }.onFailureToastAndLog(tag = "FileViewModelMedia")
+            }.onFailureToastAndLog()
         }
         if (bytes != null) {
-            textBodyByteArray = bytes
             setRefreshingStatus(false)
-            onNav.invoke(Route.TxtReader)
+            onSuccess(bytes)
         } else {
             setRefreshingStatus(false)
         }
+    }
+}
+
+internal fun FileViewModel.downloadText(fileBean: FileBean, onNav: (Route) -> Unit) {
+    downloadSmallFile(fileBean) { bytes ->
+        textBodyByteArray = bytes
+        onNav.invoke(Route.TxtReader)
+    }
+}
+
+internal fun FileViewModel.downloadWeb(fileBean: FileBean, onNav: (Route) -> Unit) {
+    downloadSmallFile(fileBean) { bytes ->
+        webBodyByteArray = bytes
+        onNav.invoke(Route.HtmlWebViewScreen)
     }
 }
 

@@ -3,6 +3,7 @@ package github.zerorooot.nap511.viewmodel
 import android.annotation.SuppressLint
 import androidx.core.text.isDigitsOnly
 import androidx.lifecycle.viewModelScope
+import com.elvishew.xlog.XLog
 import github.zerorooot.nap511.R
 import github.zerorooot.nap511.bean.FileBean
 import github.zerorooot.nap511.bean.RenameBean
@@ -69,7 +70,7 @@ internal fun FileViewModel.removeFile() {
             }
         }.onSuccess { message ->
             App.instance.toast(message)
-        }.onFailureToastAndLog(tag = "FileViewModel")
+        }.onFailureToastAndLog()
     }
 }
 
@@ -87,7 +88,7 @@ internal fun FileViewModel.createFolder(folderName: String) {
             }
         }.onSuccess { message ->
             App.instance.toast(message)
-        }.onFailureToastAndLog(tag = "FileViewModel")
+        }.onFailureToastAndLog()
     }
 }
 
@@ -101,8 +102,9 @@ internal fun FileViewModel.getFileInfo(index: Int) {
             } else {
                 fileRepository.getFileInfo(fileBean.fileId)
             }
+            XLog.d("file ${fileBean.name} fileInfo $fileInfo ; file bean $fileBean")
             openFileInfoDialog()
-        }.onFailureToastAndLog(tag = "FileViewModel")
+        }.onFailureToastAndLog()
         _isRefreshing.value = false
     }
 }
@@ -115,7 +117,6 @@ internal fun FileViewModel.delete(index: Int) {
         val beforeClickMap = clickMap.getOrDefault(currentCid, 0)
         val beforeImageBeanCache = imageBeanCache.getOrDefault(currentCid, hashMapOf())
 
-        // XLog.d("FileViewModel.delete before fileListCache size ${fileListCache.size}")
         //提前删除，优化速度
         fileBeanList.remove(fileBean)
         fileListCache[currentCid]!!.fileBeanList.remove(fileBean)
@@ -126,7 +127,6 @@ internal fun FileViewModel.delete(index: Int) {
             removeFolderCacheRecursively(fileBean.categoryId)
         }
 
-        //    XLog.d("FileViewModel.delete after fileListCache size ${fileListCache.size}")
         //delete image bean
         imageBeanCache[currentCid]?.remove(index)
 
@@ -146,7 +146,7 @@ internal fun FileViewModel.delete(index: Int) {
             }
         }.onSuccess { message ->
             App.instance.toast(message)
-        }.onFailureToastAndLog(tag = "FileViewModel")
+        }.onFailureToastAndLog()
     }
 }
 
@@ -172,7 +172,7 @@ internal fun FileViewModel.rename(name: String) {
             }
         }.onSuccess { message ->
             App.instance.toast(message)
-        }.onFailureToastAndLog(tag = "FileViewModel")
+        }.onFailureToastAndLog()
     }
 }
 
@@ -182,8 +182,6 @@ internal fun FileViewModel.deleteMultiple() {
         val beforeList = fileBeanList
         val beforeFileListCache = fileListCache[cid]
         val beforeClickMap = clickMap.getOrDefault(cid, 0)
-
-        //  XLog.d("FileViewModel.deleteMultiple before fileListCache size ${fileListCache.size}")
 
         val mapOf = hashMapOf<String, String>()
         mapOf["ignore_warn"] = "1"
@@ -202,8 +200,6 @@ internal fun FileViewModel.deleteMultiple() {
         fileListCache[cid]!!.fileBeanList = ArrayList(fileBeanList)
         clickMap[cid] = clickMap.getOrDefault(cid, 0) - filter.size
 
-        //  XLog.d("FileViewModel.deleteMultiple after fileListCache size ${fileListCache.size}")
-
         recoverFromLongPress()
 
         runCatching {
@@ -218,7 +214,7 @@ internal fun FileViewModel.deleteMultiple() {
             }
         }.onSuccess { message ->
             App.instance.toast(message)
-        }.onFailureToastAndLog(tag = "FileViewModel")
+        }.onFailureToastAndLog()
     }
 }
 
@@ -241,7 +237,10 @@ private val TXT_EXTS = setOf(
     "go", "sh", "css", "scss", "sass", "less", "class", "hpp", "cc", "hex", "hxx",
     "cxx", "c++", "cs", "py", "pl", "pm", "md", "cue", "utf", "dpt", "ofd", "eto",
     "ets", "mhtml", "mht", "uof", "dot", "wpt", "dotx", "docm", "dotm", "ett", "xlt",
-    "pptm", "ppsm", "potx", "potm", "csv", "xml", "html", "htm"
+    "pptm", "ppsm", "potx", "potm", "csv", "xml", "url"
+)
+private val HTML_EXTS = setOf(
+    "html", "htm"
 )
 
 // 2. 改造函数：入参和返回值均为 List，利用 .map() 生成全新的不可变列表
@@ -300,6 +299,7 @@ internal fun FileViewModel.formatFileBeanList(fileBeanList: List<FileBean>): Arr
                 R.drawable.mp4
             }
 
+            fileBean.icoString in HTML_EXTS -> R.drawable.web
             fileBean.icoString in ZIP_EXTS -> R.drawable.zip
             fileBean.icoString in IMG_EXTS -> R.drawable.png
             fileBean.icoString in TXT_EXTS -> R.drawable.txt

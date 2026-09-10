@@ -24,9 +24,12 @@ data class SettingUiState(
     @SerializedName(ConfigKeyUtil.CURRENT_OFFLINE_TASK) val currentOfflineTask: String = "",
     @SerializedName(ConfigKeyUtil.REQUEST_LIMIT_COUNT) val requestLimitCount: String = "200",
     @SerializedName(ConfigKeyUtil.DEFAULT_OFFLINE_CID) val defaultOfflineCid: String = "",
+    @SerializedName(ConfigKeyUtil.DEFAULT_OFFLINE_PATH) val defaultOfflinePath: String = "",
     @SerializedName(ConfigKeyUtil.FLOATING_ACTION_BUTTON_POSITION) val fabPosition: String = "End",
     @SerializedName(ConfigKeyUtil.MOVE_FAIL_FILE) val moveFailFile: String = "",
     @SerializedName(ConfigKeyUtil.DEFAULT_OFFLINE_TIME) val defaultOfflineTime: String = "5",
     @SerializedName(ConfigKeyUtil.MAX_TXT_SIZE) val txtSize: String = "200",
-    @SerializedName(ConfigKeyUtil.EXPANDED_SCREEN) val expandedScreenEnabled: Boolean = true
+    @SerializedName(ConfigKeyUtil.EXPANDED_SCREEN) val expandedScreenEnabled: Boolean = true,
+    @SerializedName(ConfigKeyUtil.EXPANDED_SCREEN_THRESHOLD) val expandedScreenThreshold: String = "600",
+    @SerializedName(ConfigKeyUtil.GRID_CELL_MIN_SIZE) val gridCellMinSize: String = "340"
 )

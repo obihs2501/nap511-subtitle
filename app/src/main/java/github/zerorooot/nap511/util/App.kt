@@ -1,5 +1,6 @@
 package github.zerorooot.nap511.util
 
+
 import android.app.Application
 import android.content.Context
 import android.content.Intent
@@ -19,6 +20,7 @@ import com.elvishew.xlog.LogItem
 import com.elvishew.xlog.XLog
 import com.elvishew.xlog.flattener.ClassicFlattener
 import com.elvishew.xlog.interceptor.AbstractFilterInterceptor
+import com.elvishew.xlog.interceptor.Interceptor
 import com.elvishew.xlog.printer.AndroidPrinter
 import com.elvishew.xlog.printer.file.FilePrinter
 import com.elvishew.xlog.printer.file.clean.FileLastModifiedCleanStrategy
@@ -35,48 +37,26 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.File
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import kotlin.properties.Delegates
-
-
-import com.elvishew.xlog.interceptor.Interceptor
 
 class AutoTagInterceptor(
-    private val defaultTag: String = "XLOG",
-    private val maxTagLength: Int = 23
+    private val defaultTag: String = "XLOG"
 ) : Interceptor {
     override fun intercept(log: LogItem): LogItem {
         // 仅当用户未显式调用 XLog.tag("CustomTag") 时，才通过堆栈动态推导
         if (log.tag == defaultTag) {
-            log.tag = resolveCallerClassName()
+            val callerTag = resolveCallerTag(
+                defaultTag = defaultTag,
+                ignoredPackages = listOf("com.elvishew.xlog.", "AutoTagInterceptor")
+            )
+            log.tag = if (callerTag == defaultTag) defaultTag else "$callerTag-$defaultTag"
         }
         return log
-    }
-
-    private fun resolveCallerClassName(): String {
-        val stackTrace = Throwable().stackTrace
-        val caller = stackTrace.firstOrNull { element ->
-            val className = element.className
-            !className.startsWith("com.elvishew.xlog.") &&
-                    !className.startsWith("java.lang.") &&
-                    !className.startsWith("dalvik.system.") &&
-                    !className.contains(AutoTagInterceptor::class.java.simpleName)
-        } ?: return defaultTag
-
-        // 提取简短类名，去除包名前缀及内部类、匿名类的 '$' 符号
-        val simpleName = caller.className.substringAfterLast('.').substringBefore('$')
-        val string = if (simpleName.length > maxTagLength) {
-            simpleName.substring(0, maxTagLength)
-        } else {
-            simpleName
-        }
-        return "$string-$defaultTag"
     }
 }
 
@@ -89,13 +69,15 @@ class App : Application(), ImageLoaderFactory {
     companion object {
         lateinit var instance: App
             private set
+
         //缓存fileListCache文件
         lateinit var cacheFile: File
     }
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     @Volatile
-    private var isLogEnabled = true
+    private var isLogEnabled = false
 
     override fun onCreate() {
         // 1.12.0 起新文字上下文菜单默认开启，但在 Dialog 内的 TextField
@@ -103,20 +85,19 @@ class App : Application(), ImageLoaderFactory {
         ComposeFoundationFlags.isNewContextMenuEnabled = false
         super.onCreate()
         instance = this
+        cacheFile = File(this.cacheDir, "fileListCache.json")
 
         appScope.launch {
             val initialCookie = DataStoreUtil.getDataSuspend(ConfigKeyUtil.COOKIE, "")
             val initialUid = DataStoreUtil.getDataSuspend(ConfigKeyUtil.UID, "0")
-            val initialLimit = DataStoreUtil.getDataSuspend(ConfigKeyUtil.REQUEST_LIMIT_COUNT, "200").toIntOrNull() ?: 200
+            val initialLimit =
+                DataStoreUtil.getDataSuspend(ConfigKeyUtil.REQUEST_LIMIT_COUNT, "200").toIntOrNull()
+                    ?: 200
             UserSessionManager.init(initialCookie, initialUid, initialLimit)
 
-            DataStoreUtil.getDataFlow(ConfigKeyUtil.LOG, true).collect { enabled ->
-                isLogEnabled = enabled
-            }
+            isLogEnabled = DataStoreUtil.getDataSuspend(ConfigKeyUtil.LOG, false)
+            initLog()
         }
-        cacheFile = File(this.cacheDir, "fileListCache.json")
-
-        initLog()
     }
 
     fun initLog() {
@@ -135,7 +116,7 @@ class App : Application(), ImageLoaderFactory {
             .flattener(ClassicFlattener())
             .build()
         XLog.init(build, AndroidPrinter(true), print);
-        XLog.d("-----------------------init-----------------------------------")
+        XLog.i("-----------------------init-----------------------------------")
     }
 
     private val toastScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -174,7 +155,7 @@ class App : Application(), ImageLoaderFactory {
                 }
 
                 val bodyStr = response.body.string()
-                XLog.d("checkLogin avatarResp: $bodyStr")
+                XLog.v("checkLogin avatarResp: $bodyStr")
 
                 // 4. 一次性反序列化，避免 Gson 嵌套双重解析
                 val type = object : TypeToken<Base115Response<AvatarBean>>() {}.type
@@ -201,7 +182,6 @@ class App : Application(), ImageLoaderFactory {
         toast(pair.second)
         return@withContext pair.first
     }
-
 
 
     /**

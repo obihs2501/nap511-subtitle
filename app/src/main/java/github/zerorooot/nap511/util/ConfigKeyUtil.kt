@@ -77,6 +77,11 @@ class ConfigKeyUtil {
         const val DEFAULT_OFFLINE_CID = "defaultOfflineCid"
 
         /**
+         * 默认离线位置，仅在setting中展示使用
+         */
+        const val DEFAULT_OFFLINE_PATH = "defaultOfflinePath"
+
+        /**
          * 默认请求个数，默认为100，具体在设置中设置
          */
         const val REQUEST_LIMIT_COUNT = "requestLimitCount"
@@ -152,6 +157,16 @@ class ConfigKeyUtil {
          * 是否启用大屏/宽屏模式 (ExpandedScreen)
          */
         const val EXPANDED_SCREEN = "expandedScreen"
+
+        /**
+         * 大屏/宽屏模式触发宽度阈值（dp）
+         */
+        const val EXPANDED_SCREEN_THRESHOLD = "expandedScreenThreshold"
+
+        /**
+         * 网格布局最小单元格宽度（dp）
+         */
+        const val GRID_CELL_MIN_SIZE = "gridCellMinSize"
 
         /**
          * 主题色模式：跟随系统、亮色模式、暗色模式

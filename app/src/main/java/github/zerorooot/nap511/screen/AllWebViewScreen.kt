@@ -55,6 +55,28 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
 @SuppressLint("SetJavaScriptEnabled")
+fun WebView.applyDefaultSettings() {
+    settings.apply {
+        javaScriptEnabled = true
+        loadWithOverviewMode = true
+        useWideViewPort = true
+        javaScriptCanOpenWindowsAutomatically = true
+        setSupportZoom(true)
+        builtInZoomControls = true
+        displayZoomControls = false
+        domStorageEnabled = true
+        databaseEnabled = true
+        textZoom = 100
+        cacheMode = WebSettings.LOAD_NO_CACHE
+        mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+        mediaPlaybackRequiresUserGesture = false
+        allowFileAccess = true
+        allowContentAccess = true
+    }
+    settings.userAgentString = ConfigKeyUtil.USER_AGENT
+}
+
+@SuppressLint("SetJavaScriptEnabled")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BaseWebViewScreen(
@@ -94,25 +116,7 @@ fun BaseWebViewScreen(
                     WebView(context).apply {
                         webViewInstance = this
                         this.webViewClient = webViewClient.invoke(this)
-                        settings.apply {
-                            javaScriptEnabled = true
-                            loadWithOverviewMode = true
-                            useWideViewPort = true
-                            javaScriptCanOpenWindowsAutomatically = true
-                            setSupportZoom(true)
-                            builtInZoomControls = true
-                            displayZoomControls = false
-                            domStorageEnabled = true
-                            databaseEnabled = true
-                            textZoom = 100
-                            cacheMode = WebSettings.LOAD_NO_CACHE
-                            mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                            // 关键：桌面版可能需要这些
-                            mediaPlaybackRequiresUserGesture = false
-                            allowFileAccess = true
-                            allowContentAccess = true
-                        }
-                        settings.userAgentString = ConfigKeyUtil.USER_AGENT
+                        applyDefaultSettings()
                         CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
 
                         webChromeClient = object : WebChromeClient() {
@@ -263,7 +267,7 @@ fun webViewClient(onUrl: (String) -> Unit): WebViewClient {
                 newHeaders.remove("X-Requested-With")
                 // 注意：如果只是返回 null，WebView 仍会发送原请求。
                 // 这里我们仅做日志记录，具体修改 headers 可能需要拦截并重新发起（略复杂）
-                XLog.d("WebView stripped X-Requested-With for $url")
+                XLog.v("WebView stripped X-Requested-With for $url")
             }
             return null
         }
@@ -387,7 +391,7 @@ fun loginWebViewClient(webView: WebView): WebViewClient {
             val url = webViewRequest.url
             if (url in urlList) {
                 cookie = CookieManager.getInstance().getCookie(url)
-                XLog.d("$url cookie $cookie")
+                XLog.v("$url cookie $cookie")
             }
 
             if (cookie != null) {
@@ -409,7 +413,7 @@ fun loginWebViewClient(webView: WebView): WebViewClient {
             // 登录页面也注入诊断，防止登录也白屏
             view?.evaluateJavascript(
                 "(function() { return {url: window.location.href, title: document.title, elements: document.getElementsByTagName('*').length}; })();",
-                { result -> XLog.d("LOGIN_DIAG_DATA: $result") })
+                { result -> XLog.v("LOGIN_DIAG_DATA: $result") })
         }
     }
 

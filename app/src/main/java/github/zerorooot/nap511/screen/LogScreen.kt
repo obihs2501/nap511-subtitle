@@ -52,7 +52,10 @@ import github.zerorooot.nap511.util.App
 import github.zerorooot.nap511.util.ConfigKeyUtil
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import my.nanihadesuka.compose.LazyColumnScrollbar
 import my.nanihadesuka.compose.ScrollbarSettings
 import java.io.BufferedInputStream
@@ -64,6 +67,7 @@ import java.io.InputStream
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.UUID
+import kotlin.time.Duration.Companion.milliseconds
 
 // ==================== 日志级别枚举与颜色设置 ====================
 enum class LogLevel(
@@ -147,6 +151,35 @@ fun LogScreen(onClick: () -> Unit) {
     val coroutine = rememberCoroutineScope()
     val formatter = DateTimeFormatter.ofPattern("yyyy/MM/dd/HH/mm/ss")
 
+    // LogScreen.kt 内部状态（默认勾选/开启）
+    var isAutoScrollEnabled by remember { mutableStateOf(true) }
+
+
+    // 自动轮询检测日志文件变动并更新
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            val logFile = File(App.instance.cacheDir, "log")
+            var lastModified = if (logFile.exists()) logFile.lastModified() else 0L
+            var lastLength = if (logFile.exists()) logFile.length() else 0L
+
+            while (isActive) {
+                delay(1000.milliseconds)
+                if (logFile.exists()) {
+                    val currentModified = logFile.lastModified()
+                    val currentLength = logFile.length()
+                    if (currentModified != lastModified || currentLength != lastLength) {
+                        lastModified = currentModified
+                        lastLength = currentLength
+                        val updatedContent = readLog()
+                        withContext(Dispatchers.Main) {
+                            rawLogText = updatedContent
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // --- 搜索相关状态 ---
     var isSearchOpen by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
@@ -206,6 +239,7 @@ fun LogScreen(onClick: () -> Unit) {
             }
 
             "滚动底部" -> {
+                isAutoScrollEnabled = true // 点击后重新开启自动追日志
                 coroutine.launch {
                     if (parsedLogs.isNotEmpty()) lazyListState.animateScrollToItem(parsedLogs.lastIndex)
                 }
@@ -229,6 +263,7 @@ fun LogScreen(onClick: () -> Unit) {
 
             "刷新日志" -> {
                 rawLogText = readLog()
+                isAutoScrollEnabled = true // 刷新日志时也重置为开启
                 coroutine.launch {
                     if (parsedLogs.isNotEmpty()) lazyListState.animateScrollToItem(parsedLogs.lastIndex)
                 }
@@ -321,9 +356,24 @@ fun LogScreen(onClick: () -> Unit) {
         }
     }
 
-    // 首次进入自动滚动至底部（仅在非搜索模式下）
-    LaunchedEffect(parsedLogs.size) {
-        if (parsedLogs.isNotEmpty() && !isSearchOpen) {
+    // 监听是否滚动到最底部，用户往上翻时自动取消勾选
+    val isAtBottom by remember {
+        derivedStateOf {
+            val lastVisibleItem = lazyListState.layoutInfo.visibleItemsInfo.lastOrNull()
+            lastVisibleItem?.index == parsedLogs.lastIndex
+        }
+    }
+
+    //用户滑动时：滑离底部设为 false，划回底部自动恢复为 true
+    LaunchedEffect(isAtBottom, lazyListState.isScrollInProgress) {
+        if (lazyListState.isScrollInProgress) {
+            isAutoScrollEnabled = isAtBottom
+        }
+    }
+
+    // 首次进入自动滚动至底部（仅在非搜索模式下）日志更新或开关变化时，自动滚动到底部
+    LaunchedEffect(parsedLogs.size, isAutoScrollEnabled) {
+        if (isAutoScrollEnabled && parsedLogs.isNotEmpty() && !isSearchOpen) {
             lazyListState.scrollToItem(parsedLogs.lastIndex)
         }
     }
@@ -543,7 +593,7 @@ fun writeToPublicExternalStorage(
                 resolver.openOutputStream(it)?.use { outputStream ->
                     outputStream.write(content.toByteArray())
                     App.instance.toast("导出成功，日志文件保存至Downloads目录，文件名为:$fileName")
-                    XLog.d("FileWrite File written to Downloads: $uri")
+                    XLog.i("FileWrite File written to Downloads: $uri")
                 }
             }
         } else {
@@ -553,7 +603,7 @@ fun writeToPublicExternalStorage(
             )
             try {
                 file.writeText(content)
-                XLog.d("FileWrite File written to: ${file.absolutePath}")
+                XLog.i("FileWrite File written to: ${file.absolutePath}")
             } catch (e: IOException) {
                 e.printStackTrace()
                 XLog.e("FileWrite Error writing file: $e")

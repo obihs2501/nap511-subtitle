@@ -274,8 +274,9 @@ fun SettingContent(
                 item {
                     EditTextPreferenceItem(
                         title = "默认离线保存目录",
-                        summary = uiState.defaultOfflineCid.ifEmpty { "文件夹 CID，长按目录可设置为默认位置" },
+                        summary = if (uiState.defaultOfflinePath.isEmpty()) "长按目录可设置为默认位置" else "默认离线位置为: ${uiState.defaultOfflinePath}",
                         value = uiState.defaultOfflineCid,
+                        label = "文件夹CID",
                         onValueSave = { onSaveConfig(ConfigKeyUtil.DEFAULT_OFFLINE_CID, it) }
                     )
                 }
@@ -513,19 +514,39 @@ fun SettingContent(
                     )
                 }
                 item {
-                    SwitchPreferenceItem(
-                        title = "应用动态配色",
-                        summary = "根据系统壁纸自动衍生应用配色（仅支持 Android 12+）",
-                        checked = uiState.dynamicColorEnabled,
-                        onCheckedChange = { onSaveConfig(ConfigKeyUtil.DYNAMIC_COLOR, it) }
+                    EditTextPreferenceItem(
+                        title = "大屏宽度阈值",
+                        summary = "屏幕宽度达到 ${uiState.expandedScreenThreshold} dp 时触发大屏布局",
+                        value = uiState.expandedScreenThreshold,
+                        isNumber = true,
+                        enabled = uiState.expandedScreenEnabled,
+                        onValueSave = { onSaveConfig(ConfigKeyUtil.EXPANDED_SCREEN_THRESHOLD, it) }
+                    )
+                }
+                item {
+                    EditTextPreferenceItem(
+                        title = "网格最小宽度",
+                        summary = "网格布局单列最小宽度为 ${uiState.gridCellMinSize} dp",
+                        value = uiState.gridCellMinSize,
+                        isNumber = true,
+                        enabled = uiState.expandedScreenEnabled,
+                        onValueSave = { onSaveConfig(ConfigKeyUtil.GRID_CELL_MIN_SIZE, it) }
                     )
                 }
                 item {
                     SwitchPreferenceItem(
                         title = "大屏扩展模式",
-                        summary = "在平板或大屏设备（屏幕宽度 ≥ 600dp）上启用大屏展开布局",
+                        summary = "在平板或大屏设备（屏幕宽度 ≥ ${uiState.expandedScreenThreshold}dp）上启用大屏展开布局",
                         checked = uiState.expandedScreenEnabled,
                         onCheckedChange = { onSaveConfig(ConfigKeyUtil.EXPANDED_SCREEN, it) }
+                    )
+                }
+                item {
+                    SwitchPreferenceItem(
+                        title = "应用动态配色",
+                        summary = "根据系统壁纸自动衍生应用配色（仅支持 Android 12+）",
+                        checked = uiState.dynamicColorEnabled,
+                        onCheckedChange = { onSaveConfig(ConfigKeyUtil.DYNAMIC_COLOR, it) }
                     )
                 }
                 item {

@@ -7,6 +7,7 @@ import android.content.ClipboardManager
 import android.content.Intent
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.material3.FabPosition
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -55,12 +56,24 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import retrofit2.HttpException
 import java.io.File
+
+data class FileUiState(
+    val path: String = "",
+    val isRefreshing: Boolean = false,
+    val earlyLoading: Boolean = false,
+    val maxTxtSizeStr: String = "200",
+    val aria2UrlConfig: String = ConfigKeyUtil.ARIA2_URL_DEFAULT_VALUE,
+    val fabPosition: FabPosition = FabPosition.End
+)
 
 
 @SuppressLint("MutableCollectionMutableState")
@@ -70,11 +83,11 @@ class FileViewModel(application: Application) : AndroidViewModel(application) {
     var unzipBeanList = mutableStateOf(ZipBeanList())
     var remainingSpace by mutableStateOf(RemainingSpaceBean())
     var textBodyByteArray by mutableStateOf<ByteArray?>(null)
+    var webBodyByteArray by mutableStateOf<ByteArray?>(null)
 
     var appBarTitle by mutableStateOf(context.getString(R.string.app_name))
 
     private val _currentPath = MutableStateFlow("")
-    var currentPath = _currentPath.asStateFlow()
 
     var currentCid by mutableStateOf("0")
 
@@ -94,7 +107,49 @@ class FileViewModel(application: Application) : AndroidViewModel(application) {
 
 
     internal val _isRefreshing = MutableStateFlow(false)
-    var isRefreshing = _isRefreshing.asStateFlow()
+
+    val uiState: StateFlow<FileUiState> = combine(
+        _currentPath,
+        _isRefreshing,
+        DataStoreUtil.getDataFlow(ConfigKeyUtil.EARLY_LOADING, false),
+        DataStoreUtil.getDataFlow(ConfigKeyUtil.MAX_TXT_SIZE, "200"),
+        DataStoreUtil.getDataFlow(
+            ConfigKeyUtil.ARIA2_URL,
+            ConfigKeyUtil.ARIA2_URL_DEFAULT_VALUE
+        ),
+        DataStoreUtil.getDataFlow(
+            ConfigKeyUtil.FLOATING_ACTION_BUTTON_POSITION,
+            "End"
+        )
+    ) { values: Array<Any?> ->
+        val path = values[0] as String
+        val refreshing = values[1] as Boolean
+        val earlyLoading = values[2] as Boolean
+        val maxTxtSizeStr = values[3] as String
+        val aria2UrlConfig = values[4] as String
+        val fabPosStr = values[5] as String
+
+        val fabPosition = when (fabPosStr) {
+            "Start" -> FabPosition.Start
+            "Center" -> FabPosition.Center
+            "End" -> FabPosition.End
+            "EndOverlay" -> FabPosition.EndOverlay
+            else -> FabPosition.End
+        }
+
+        FileUiState(
+            path = path,
+            isRefreshing = refreshing,
+            earlyLoading = earlyLoading,
+            maxTxtSizeStr = maxTxtSizeStr,
+            aria2UrlConfig = aria2UrlConfig,
+            fabPosition = fabPosition
+        )
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = FileUiState()
+    )
 
 
     var torrentBean by mutableStateOf(TorrentFileBean())
@@ -172,7 +227,7 @@ class FileViewModel(application: Application) : AndroidViewModel(application) {
         if (uri.scheme == "nap511" && uri.host == "detail") {
             val command = uri.lastPathSegment // "check" 或 "copy"
             val param = uri.getQueryParameter("param") ?: ""
-            XLog.d("FileViewModel handleDeepLink $uri")
+            XLog.i("FileViewModel handleDeepLink $uri")
             when (command) {
                 "addTask" -> {
                     XLog.d(param)
@@ -248,7 +303,7 @@ class FileViewModel(application: Application) : AndroidViewModel(application) {
                     fileRepository.getFiles(cid = cid, order = orderBean.type, asc = orderBean.asc)
                 files.fileBeanList = formatFileBeanList(files.fileBeanList)
                 fileListCache[cid] = files
-            }.onFailureToastAndLog(tag = "FileViewModel")
+            }.onFailureToastAndLog()
         }
     }
 
@@ -328,7 +383,7 @@ class FileViewModel(application: Application) : AndroidViewModel(application) {
                     val spaceInfoJson = gson.getAsJsonObject("data").get("space_info")
                     remainingSpace = Gson().fromJson(spaceInfoJson, RemainingSpaceBean::class.java)
                 }
-            }.onFailureToastAndLog(tag = "FileViewModel")
+            }.onFailureToastAndLog()
         }
     }
 
@@ -365,7 +420,7 @@ class FileViewModel(application: Application) : AndroidViewModel(application) {
                 if (expiredTip != null) {
                     App.instance.toast(expiredTip)
                     fileListCache.clearAll()
-                    UserSessionManager.updateSession("", "")
+                    UserSessionManager.clearSession()
                     _navigationEvent.send(NavEvent.NavigateToScreen(Route.Login))
                 } else {
                     XLog.e("getFiles Exception ", it)
@@ -392,7 +447,7 @@ class FileViewModel(application: Application) : AndroidViewModel(application) {
                 } else {
                     App.instance.toast("排序失败")
                 }
-            }.onFailureToastAndLog(tag = "FileViewModel")
+            }.onFailureToastAndLog()
         }
     }
 
@@ -420,10 +475,8 @@ class FileViewModel(application: Application) : AndroidViewModel(application) {
 
     }
 
-    override fun onCleared() {
-        viewModelScope.launch {
-            fileListCache.deleteIndividualFile()
-        }
+    fun deleteIndividualFile() {
+        fileListCache.deleteIndividualFile()
     }
 
     fun refresh(forceCache: Boolean = false) {
@@ -490,7 +543,7 @@ class FileViewModel(application: Application) : AndroidViewModel(application) {
                 fileBeanList.clear()
                 fileBeanList.addAll(files.fileBeanList)
                 appBarTitle = "搜索 - $searchKey"
-            }.onFailureToastAndLog(tag = "FileViewModel")
+            }.onFailureToastAndLog()
             _isRefreshing.value = false
         }
     }
@@ -505,7 +558,7 @@ class FileViewModel(application: Application) : AndroidViewModel(application) {
                 fileBeanList.clear()
                 fileBeanList.addAll(files.fileBeanList)
                 appBarTitle = "过滤 - $name"
-            }.onFailureToastAndLog(tag = "FileViewModel")
+            }.onFailureToastAndLog()
             _isRefreshing.value = false
         }
     }

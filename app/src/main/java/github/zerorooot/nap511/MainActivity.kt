@@ -82,6 +82,7 @@ import github.zerorooot.nap511.screen.OfflineFileScreen
 import github.zerorooot.nap511.screen.RecycleScreen
 import github.zerorooot.nap511.screen.RepeatFileScreen
 import github.zerorooot.nap511.screen.SettingScreen
+import github.zerorooot.nap511.screen.HtmlWebViewScreen
 import github.zerorooot.nap511.screen.TxtReaderScreen
 import github.zerorooot.nap511.screen.WebViewScreen
 import github.zerorooot.nap511.screenitem.Avatar
@@ -260,8 +261,23 @@ class MainActivity : AppCompatActivity() {
 
         val isExpandedConfig by DataStoreUtil.getDataFlow(ConfigKeyUtil.EXPANDED_SCREEN, true)
             .collectAsStateWithLifecycle(initialValue = true)
+        val expandedScreenThresholdStr by DataStoreUtil.getDataFlow(
+            ConfigKeyUtil.EXPANDED_SCREEN_THRESHOLD,
+            "600"
+        ).collectAsStateWithLifecycle(initialValue = "600")
+        val expandedScreenThreshold =
+            expandedScreenThresholdStr.toInt().takeIf { i -> i > 0 } ?: 600
+
         val isExpandedScreen =
-            (LocalConfiguration.current.screenWidthDp >= 600) && isExpandedConfig
+            (LocalConfiguration.current.screenWidthDp >= expandedScreenThreshold) && isExpandedConfig
+
+        val gridCellMinSizeStr by DataStoreUtil.getDataFlow(
+            ConfigKeyUtil.GRID_CELL_MIN_SIZE,
+            "340"
+        ).collectAsStateWithLifecycle(initialValue = "340")
+        val gridCellMinSize = remember(gridCellMinSizeStr) {
+            (gridCellMinSizeStr.toInt().takeIf { i -> i > 0 } ?: 340).dp
+        }
 
 
         // 监听当前导航栈顶的路由，用于高亮显示 Drawer 中选中的 Item
@@ -279,6 +295,7 @@ class MainActivity : AppCompatActivity() {
                 //直接关闭应用并返回桌面
                 // finish()
                 //将应用压入后台保留状态（类似按 Home 键）
+                fileViewModel.deleteIndividualFile()
                 moveTaskToBack(true)
             } else {
                 lastBackPressTime = currentTime
@@ -399,6 +416,7 @@ class MainActivity : AppCompatActivity() {
                             fileViewModel,
                             audioViewModel,
                             isExpandedScreen,
+                            gridCellMinSize,
                             {
                                 scope.launch(Dispatchers.Main) {
                                     navController.navigate(it)
@@ -421,12 +439,12 @@ class MainActivity : AppCompatActivity() {
                             offlineFileViewModel.quota()
                         }
 
-                        val currentPath by fileViewModel.currentPath.collectAsStateWithLifecycle()
+                        val uiState by fileViewModel.uiState.collectAsStateWithLifecycle()
                         val quotaBean by offlineFileViewModel.quotaBean.collectAsState()
                         val urlText by offlineFileViewModel.urlText
 
                         OfflineDownloadScreen(
-                            currentPath,
+                            uiState.path,
                             quotaBean,
                             urlText,
                             { scope.launch { drawerState.open() } }
@@ -446,6 +464,7 @@ class MainActivity : AppCompatActivity() {
                         OfflineFileScreen(
                             offlineFileViewModel,
                             isExpandedScreen,
+                            gridCellMinSize,
                             { fileViewModel.getFiles(it) }
                         ) {
                             when (it) {
@@ -518,7 +537,7 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                     composable<Route.RecycleBin> {
-                        RecycleScreen(recycleViewModel, isExpandedScreen) {
+                        RecycleScreen(recycleViewModel, isExpandedScreen, gridCellMinSize) {
                             scope.launch { drawerState.open() }
                         }
                     }
@@ -587,6 +606,7 @@ class MainActivity : AppCompatActivity() {
                         RepeatFileScreen(
                             repeatViewModel,
                             isExpandedScreen,
+                            gridCellMinSize,
                             { scope.launch { drawerState.open() } }) {
                             fileViewModel.getFiles(it)
                             navController.navigate(Route.MyFile) {
@@ -617,6 +637,26 @@ class MainActivity : AppCompatActivity() {
                     composable<Route.MusicDetail> {
                         MusicDetailScreen(audioViewModel) {
                             navController.popBackStack()
+                        }
+                    }
+
+                    composable<Route.HtmlWebViewScreen> {
+                        val byteArray = fileViewModel.webBodyByteArray
+                        val fileBean =
+                            fileViewModel.fileBeanList.getOrNull(fileViewModel.selectIndex)
+
+                        LaunchedEffect(byteArray) {
+                            if (byteArray == null) {
+                                navController.popBackStack()
+                            }
+                        }
+
+                        if (byteArray != null) {
+                            navGesturesEnabled = false
+                            HtmlWebViewScreen(byteArray, title = fileBean?.name ?: "网页") {
+                                navGesturesEnabled = true
+                                navController.popBackStack()
+                            }
                         }
                     }
 
@@ -671,7 +711,7 @@ class MainActivity : AppCompatActivity() {
                             App.instance.checkLogin(cookie)
                         } catch (e: Exception) {
                             App.instance.toast("解析配置失败")
-                            XLog.d("LoginScreen LoginCredential.ConfigFile jsonString ${credential.rawJson}")
+                            XLog.e("LoginScreen LoginCredential.ConfigFile jsonString ${credential.rawJson}", e)
                             false
                         }
                     }

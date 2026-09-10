@@ -49,7 +49,6 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FabPosition
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -60,7 +59,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
@@ -79,8 +77,12 @@ import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.nativeClipboardManager
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil.annotation.ExperimentalCoilApi
+import coil.imageLoader
+import coil.memory.MemoryCache
 import com.google.gson.Gson
 import github.zerorooot.nap511.R
 import github.zerorooot.nap511.activity.VideoActivity
@@ -101,13 +103,13 @@ import github.zerorooot.nap511.viewmodel.cut
 import github.zerorooot.nap511.viewmodel.delete
 import github.zerorooot.nap511.viewmodel.deleteMultiple
 import github.zerorooot.nap511.viewmodel.downloadText
+import github.zerorooot.nap511.viewmodel.downloadWeb
 import github.zerorooot.nap511.viewmodel.getFileInfo
 import github.zerorooot.nap511.viewmodel.getTorrentTask
 import github.zerorooot.nap511.viewmodel.getVideoInfo
 import github.zerorooot.nap511.viewmodel.getZipListFile
 import github.zerorooot.nap511.viewmodel.openAria2Dialog
 import github.zerorooot.nap511.viewmodel.openCreateFolderDialog
-import github.zerorooot.nap511.viewmodel.openCreateSelectTorrentFileDialog
 import github.zerorooot.nap511.viewmodel.openFileOrderDialog
 import github.zerorooot.nap511.viewmodel.openRenameFileDialog
 import github.zerorooot.nap511.viewmodel.openSearchDialog
@@ -125,46 +127,26 @@ import androidx.compose.foundation.lazy.grid.itemsIndexed as gridItemsIndexed
 
 @OptIn(
     ExperimentalFoundationApi::class,
-    ExperimentalMaterial3Api::class
+    ExperimentalMaterial3Api::class, ExperimentalCoilApi::class
 )
 @Composable
 fun FileScreen(
     fileViewModel: FileViewModel,
     audioViewModel: AudioViewModel,
     isExpandedScreen: Boolean,
+    gridCellMinSize: Dp,
     onNav: (Route) -> Unit,
     onOpenDrawer: () -> Unit,
     drawerState: () -> Boolean
 ) {
-    val fabPositionSetting by DataStoreUtil.getDataFlow(
-        ConfigKeyUtil.FLOATING_ACTION_BUTTON_POSITION,
-        "End"
-    )
-        .collectAsStateWithLifecycle(initialValue = "End")
-    val fabPosition = remember(fabPositionSetting) {
-        when (fabPositionSetting) {
-            "Start" -> FabPosition.Start
-            "Center" -> FabPosition.Center
-            "End" -> FabPosition.End
-            "EndOverlay" -> FabPosition.EndOverlay
-            else -> FabPosition.End
-        }
-    }
-    val earlyLoading by DataStoreUtil.getDataFlow(ConfigKeyUtil.EARLY_LOADING, false)
-        .collectAsStateWithLifecycle(initialValue = false)
-    val maxTxtSizeStr by DataStoreUtil.getDataFlow(ConfigKeyUtil.MAX_TXT_SIZE, "200")
-        .collectAsStateWithLifecycle(initialValue = "200")
-    val aria2UrlConfig by DataStoreUtil.getDataFlow(
-        ConfigKeyUtil.ARIA2_URL,
-        ConfigKeyUtil.ARIA2_URL_DEFAULT_VALUE
-    )
-        .collectAsStateWithLifecycle(initialValue = ConfigKeyUtil.ARIA2_URL_DEFAULT_VALUE)
+    val uiState by fileViewModel.uiState.collectAsStateWithLifecycle()
 
     val fileBeanList = fileViewModel.fileBeanList
-    val path by fileViewModel.currentPath.collectAsStateWithLifecycle()
-    val refreshing by fileViewModel.isRefreshing.collectAsStateWithLifecycle()
+    val path = uiState.path
+    val refreshing = uiState.isRefreshing
     val context = LocalContext.current
     var showDialog by rememberSaveable { mutableIntStateOf(-1) }
+    val imageLoader = context.imageLoader
 
     val listLocation = fileViewModel.getListLocation(path)
     val listState = key(path) {
@@ -246,7 +228,7 @@ fun FileScreen(
 
     fun handleFolderClick(i: Int, fileBean: FileBean) {
         isBottomBarShow = true
-        if (earlyLoading) {
+        if (uiState.earlyLoading) {
             listOf(i - 1, i + 1)
                 .mapNotNull { fileBeanList.getOrNull(it) }
                 .filter { it.isFolder }
@@ -287,7 +269,6 @@ fun FileScreen(
 
     fun handleTorrentClick(fileBean: FileBean) {
         fileViewModel.getTorrentTask(fileBean.sha1)
-        fileViewModel.openCreateSelectTorrentFileDialog()
     }
 
     fun handleZipClick(i: Int) {
@@ -295,14 +276,26 @@ fun FileScreen(
         fileViewModel.getZipListFile()
     }
 
-    fun handleTextClick(i: Int, fileBean: FileBean) {
-        val txtSize = maxTxtSizeStr.toIntOrNull() ?: 200
+    fun checkAndDownloadFile(i: Int, fileBean: FileBean, action: () -> Unit) {
+        val txtSize = uiState.maxTxtSizeStr.toIntOrNull() ?: 200
         if (fileBean.size.toLong() < txtSize * 1024) {
             fileViewModel.selectIndex = i
-            fileViewModel.downloadText(fileBean, onNav)
+            action()
         } else {
             fileViewModel.setRefreshingStatus(false)
             App.instance.toast("仅支持打开${txtSize}kb以下的文件")
+        }
+    }
+
+    fun handleTextClick(i: Int, fileBean: FileBean) {
+        checkAndDownloadFile(i, fileBean) {
+            fileViewModel.downloadText(fileBean, onNav)
+        }
+    }
+
+    fun handleWebClick(i: Int, fileBean: FileBean) {
+        checkAndDownloadFile(i, fileBean) {
+            fileViewModel.downloadWeb(fileBean, onNav)
         }
     }
 
@@ -333,6 +326,10 @@ fun FileScreen(
 
                     ForceOpenType.TEXT -> {
                         handleTextClick(showDialog, bean)
+                    }
+
+                    ForceOpenType.WEB -> {
+                        handleWebClick(showDialog, bean)
                     }
 
                     ForceOpenType.ARCHIVE -> {
@@ -378,6 +375,7 @@ fun FileScreen(
                 fileBean.fileIco == R.drawable.torrent -> handleTorrentClick(fileBean)
                 fileBean.fileIco == R.drawable.zip -> handleZipClick(i)
                 fileBean.fileIco == R.drawable.txt -> handleTextClick(i, fileBean)
+                fileBean.fileIco == R.drawable.web -> handleWebClick(i, fileBean)
                 fileBean.fileIco == R.drawable.mp3 -> handleAudioClick(fileBean)
                 fileBean.photoThumb.isNotEmpty() -> handlePhotoClick(fileBean)
                 else -> fileViewModel.setRefreshingStatus(false)
@@ -387,7 +385,7 @@ fun FileScreen(
     }
 
     fun onMenuAria2Download(index: Int) {
-        if (aria2UrlConfig == ConfigKeyUtil.ARIA2_URL_DEFAULT_VALUE) {
+        if (uiState.aria2UrlConfig == ConfigKeyUtil.ARIA2_URL_DEFAULT_VALUE) {
             fileViewModel.openAria2Dialog()
         } else {
             fileViewModel.startSendAria2Service(index)
@@ -488,7 +486,11 @@ fun FileScreen(
                 label = ""
             ) {
                 if (it) {
-                    AppTopBarMultiple(fileViewModel.appBarTitle, ::myAppBarOnClick)
+                    AppTopBarMultiple(
+                        title = fileViewModel.appBarTitle,
+                        isExpandedScreen = isExpandedScreen,
+                        onClick = ::myAppBarOnClick
+                    )
                 } else {
                     AppTopBarNormal(fileViewModel.appBarTitle, ::myAppBarOnClick)
                 }
@@ -515,7 +517,7 @@ fun FileScreen(
                 onAddFolder = { fileViewModel.openCreateFolderDialog() }
             )
         },
-        floatingActionButtonPosition = fabPosition
+        floatingActionButtonPosition = uiState.fabPosition
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -551,6 +553,15 @@ fun FileScreen(
                             ConfigKeyUtil.DEFAULT_OFFLINE_CID,
                             cid
                         )
+
+                        val index = fileViewModel.pathList.indexOfFirst { it.cid == cid }
+                        val pathString =
+                            fileViewModel.pathList.take(index + 1)
+                                .joinToString(separator = "/") { it.name }
+                        DataStoreUtil.putDataSuspend(
+                            ConfigKeyUtil.DEFAULT_OFFLINE_PATH,
+                            pathString
+                        )
                     }
                     App.instance.toast("设置默认离线位置为: $name")
                 },
@@ -565,9 +576,17 @@ fun FileScreen(
                 path = path,
                 listState = listState,
                 gridState = gridState,
+                gridCellMinSize = gridCellMinSize,
                 isExpandedScreen = isExpandedScreen,
                 clickIndex = fileViewModel.clickMap.getOrDefault(path, -1),
-                onRefresh = { fileViewModel.refresh() },
+                onRefresh = {
+                    //手动清除对应 image fileId 的内存和磁盘缓存，触发重新下载
+                    fileViewModel.fileBeanList.forEach { fileBean->
+                        imageLoader.memoryCache?.remove(MemoryCache.Key(fileBean.fileId))
+                        imageLoader.diskCache?.remove(fileBean.fileId)
+                    }
+                    fileViewModel.refresh()
+                },
                 onItemClick = ::myItemOnClick,
                 onItemLongClick = ::itemOnLongClick,
                 onCut = { fileViewModel.cut(it) },
@@ -626,7 +645,7 @@ private fun FilePathBar(
                 val interactionSource = remember { MutableInteractionSource() }
                 Box {
                     FilterChip(
-                        selected = true,
+                        selected = (index != pathList.size - 1),
                         onClick = {},
                         label = {
                             Text(text = path.name.ifEmpty { "根目录" })
@@ -706,6 +725,7 @@ private fun FileListContent(
     path: String,
     listState: LazyListState,
     gridState: LazyGridState,
+    gridCellMinSize: Dp,
     isExpandedScreen: Boolean,
     clickIndex: Int,
     onRefresh: () -> Unit,
@@ -744,7 +764,7 @@ private fun FileListContent(
                     ) {
                         LazyVerticalGrid(
                             state = gridState,
-                            columns = GridCells.Adaptive(minSize = 340.dp),
+                            columns = GridCells.Adaptive(minSize = gridCellMinSize),
 //                            contentPadding = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal).asPaddingValues(),
                             modifier = Modifier.fillMaxSize()
                         ) {
