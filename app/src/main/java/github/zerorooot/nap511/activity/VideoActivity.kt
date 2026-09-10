@@ -3,12 +3,14 @@ package github.zerorooot.nap511.activity
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.os.Bundle
 import android.view.View
 import android.widget.Toast
 import androidx.activity.addCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 import androidx.annotation.OptIn
 import androidx.appcompat.app.AppCompatActivity
@@ -72,6 +74,7 @@ import com.shuyu.gsyvideoplayer.player.PlayerFactory
 import com.shuyu.gsyvideoplayer.subtitle.GSYSubtitleSource
 import github.zerorooot.nap511.R
 import github.zerorooot.nap511.bean.FileBean
+import github.zerorooot.nap511.bean.SubtitleBrowseState
 import github.zerorooot.nap511.bean.SubtitleStyleState
 import github.zerorooot.nap511.bean.VideoInfoBean
 import github.zerorooot.nap511.bean.XunleiSubtitleBean
@@ -267,6 +270,15 @@ class VideoActivity : AppCompatActivity() {
     private var subtitleStyle by mutableStateOf(SubtitleStyleState())
     private var subtitleDelayMs by mutableStateOf(0L)
 
+    /** 网盘字幕浏览状态 */
+    private var browseState by mutableStateOf(SubtitleBrowseState())
+
+    /** 本机字幕文件选择器（srt/ass 的 MIME 各家不一，用 */* 再按扩展名校验） */
+    private val localSubtitlePicker =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+            if (uri != null) loadLocalSubtitle(uri)
+        }
+
     /** 视频所在目录的 cid，用于查找同目录字幕（getVideoInfo 已把真实 pid 写入 VideoInfoBean.parentId） */
     private val videoParentCid: String by lazy { videoInfo.parentId }
 
@@ -358,7 +370,11 @@ class VideoActivity : AppCompatActivity() {
                         selectedSubtitleName = activeSubtitleName,
                         style = subtitleStyle,
                         delayMs = subtitleDelayMs,
-                        onDismiss = { showSubtitleDialog = false },
+                        browse = browseState,
+                        onDismiss = {
+                            showSubtitleDialog = false
+                            browseState = browseState.copy(active = false)
+                        },
                         onSelectCloudSubtitle = { fileBean ->
                             showSubtitleDialog = false
                             loadCloudSubtitle(fileBean)
@@ -382,6 +398,15 @@ class VideoActivity : AppCompatActivity() {
                         onDelayChange = { ms ->
                             subtitleDelayMs = ms
                             applySubtitleDelay(ms)
+                        },
+                        onBrowseStart = { startBrowse() },
+                        onBrowseOpenFolder = { cid -> openBrowseFolder(cid) },
+                        onBrowseUp = { browseUp() },
+                        onBrowseExit = { browseState = browseState.copy(active = false) },
+                        onPickLocalSubtitle = {
+                            showSubtitleDialog = false
+                            browseState = browseState.copy(active = false)
+                            localSubtitlePicker.launch(arrayOf("*/*"))
                         }
                     )
                 }
@@ -760,6 +785,65 @@ class VideoActivity : AppCompatActivity() {
     private fun applySubtitleDelay(delayMs: Long) {
         runCatching { videoPlayer.setSubtitleOffsetMs(-delayMs) }
             .onFailure { XLog.e("设置字幕延迟失败", it) }
+    }
+
+    // ---------------- 网盘目录浏览 ----------------
+
+    private fun startBrowse() {
+        openBrowseFolder(videoParentCid.ifEmpty { "0" })
+    }
+
+    private fun openBrowseFolder(cid: String) {
+        browseState = browseState.copy(active = true, loading = true, error = "")
+        lifecycleScope.launch {
+            runCatching { subtitleRepository.listFolder(cid) }
+                .onSuccess { listing ->
+                    val matched = listing.subtitles
+                        .filter { subtitleRepository.matchesVideo(videoInfo.fileName, it.name) }
+                        .map { it.fileId }
+                        .toSet()
+                    browseState = SubtitleBrowseState(
+                        active = true,
+                        loading = false,
+                        cid = cid,
+                        path = listing.path,
+                        folders = listing.folders,
+                        subtitles = listing.subtitles,
+                        matched = matched
+                    )
+                }
+                .onFailure {
+                    XLog.e("浏览网盘目录失败: $cid", it)
+                    browseState = browseState.copy(
+                        loading = false,
+                        error = "目录加载失败: ${it.localizedMessage ?: "未知错误"}"
+                    )
+                }
+        }
+    }
+
+    /** 面包屑最后一项为当前目录，倒数第二项即上级 */
+    private fun browseUp() {
+        val path = browseState.path
+        if (path.size >= 2) openBrowseFolder(path[path.size - 2].cid)
+    }
+
+    // ---------------- 本机字幕 ----------------
+
+    private fun loadLocalSubtitle(uri: Uri) {
+        lifecycleScope.launch {
+            val file = subtitleRepository.importLocalSubtitle(applicationContext, uri, subtitleCacheDir)
+            if (file == null) {
+                App.instance.toast("无法读取所选字幕（仅支持 srt/ass/ssa/vtt）")
+                return@launch
+            }
+            if (mountSubtitleFile(file)) {
+                activeSubtitleName = file.name
+                App.instance.toast("字幕已挂载: ${file.name}")
+            } else {
+                App.instance.toast("字幕解析失败")
+            }
+        }
     }
 
     private fun clearSubtitle() {

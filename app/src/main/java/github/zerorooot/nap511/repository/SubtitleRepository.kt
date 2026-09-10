@@ -1,10 +1,14 @@
 package github.zerorooot.nap511.repository
 
+import android.content.Context
+import android.net.Uri
+import android.provider.OpenableColumns
 import com.google.gson.Gson
 import com.google.gson.JsonParser
 import com.elvishew.xlog.XLog
 import github.zerorooot.nap511.bean.FileBean
 import github.zerorooot.nap511.bean.FilesBean
+import github.zerorooot.nap511.bean.PathBean
 import github.zerorooot.nap511.bean.XunleiSubtitleBean
 import github.zerorooot.nap511.util.NetworkClient
 import kotlinx.coroutines.Dispatchers
@@ -118,6 +122,61 @@ class SubtitleRepository {
     fun isSubtitleFile(fileName: String): Boolean {
         val ext = fileName.substringAfterLast('.', "").lowercase()
         return ext in SUBTITLE_EXTENSIONS
+    }
+
+    /** 字幕文件名是否与视频文件名匹配（去扩展名后同名或同名+分隔符后缀） */
+    fun matchesVideo(videoName: String, subtitleName: String): Boolean =
+        isNameMatch(videoName.substringBeforeLast('.'), subtitleName.substringBeforeLast('.'))
+
+    /** 目录浏览结果 */
+    data class FolderListing(
+        val path: List<PathBean>,
+        val folders: List<FileBean>,
+        val subtitles: List<FileBean>
+    )
+
+    /**
+     * 列出目录下的子文件夹与字幕文件（用于在弹窗里逐级浏览网盘挑选字幕）
+     * Gson 原始数据里 isFolder 未填充，用 fileId 为空判文件夹
+     */
+    suspend fun listFolder(cid: String): FolderListing = withContext(Dispatchers.IO) {
+        val filesBean: FilesBean = FileRepository.getInstance().getFiles(cid = cid, limit = 1150)
+        @Suppress("USELESS_ELVIS")
+        val path: List<PathBean> = filesBean.path ?: emptyList()
+        val folders = filesBean.fileBeanList
+            .filter { it.fileId.isEmpty() }
+            .sortedBy { it.name.lowercase() }
+        val subtitles = filesBean.fileBeanList
+            .filter { it.fileId.isNotEmpty() && isSubtitleFile(it.name) }
+            .sortedBy { it.name.lowercase() }
+        FolderListing(path, folders, subtitles)
+    }
+
+    /**
+     * 把本机选中的字幕（SAF Uri）复制到缓存目录，返回本地文件；扩展名不支持或读取失败返回 null
+     */
+    suspend fun importLocalSubtitle(context: Context, uri: Uri, cacheDir: File): File? {
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                val resolver = context.contentResolver
+                var name = ""
+                resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                    ?.use { c -> if (c.moveToFirst()) name = c.getString(0) ?: "" }
+                if (name.isEmpty()) {
+                    name = uri.lastPathSegment?.substringAfterLast('/') ?: "local_subtitle"
+                }
+                if (!isSubtitleFile(name)) throw IOException("不支持的字幕格式: $name")
+                if (!cacheDir.exists()) cacheDir.mkdirs()
+                val safeName = name.replace(Regex("[\\\\/:*?\"<>|]"), "_")
+                val target = File(cacheDir, safeName)
+                resolver.openInputStream(uri)?.use { input ->
+                    target.outputStream().use { out -> input.copyTo(out) }
+                } ?: throw IOException("无法打开所选文件")
+                target
+            }.onFailure {
+                XLog.e("SubtitleRepository importLocalSubtitle 失败: $uri", it)
+            }.getOrNull()
+        }
     }
 
     /**

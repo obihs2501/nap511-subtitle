@@ -35,3 +35,20 @@ data class SubtitleStyleState(
     /** 半透明底色 */
     val background: Boolean = false
 )
+
+/**
+ * 网盘字幕浏览状态（在字幕弹窗里逐级浏览目录挑选字幕）
+ */
+data class SubtitleBrowseState(
+    val active: Boolean = false,
+    val loading: Boolean = false,
+    /** 当前目录 cid */
+    val cid: String = "",
+    /** 面包屑：根目录 … 当前目录（最后一项为当前目录） */
+    val path: List<PathBean> = emptyList(),
+    val folders: List<FileBean> = emptyList(),
+    val subtitles: List<FileBean> = emptyList(),
+    /** 与视频同名的字幕 fileId 集合 */
+    val matched: Set<String> = emptySet(),
+    val error: String = ""
+)

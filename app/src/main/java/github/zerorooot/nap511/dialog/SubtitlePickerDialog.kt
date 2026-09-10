@@ -21,9 +21,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -51,6 +54,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -60,6 +64,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import github.zerorooot.nap511.bean.FileBean
+import github.zerorooot.nap511.bean.SubtitleBrowseState
 import github.zerorooot.nap511.bean.SubtitleStyleState
 import github.zerorooot.nap511.bean.XunleiSubtitleBean
 import github.zerorooot.nap511.util.SubtitleStyleUtil
@@ -68,7 +73,7 @@ import kotlin.math.roundToInt
 
 /**
  * 字幕弹窗：
- * - 「字幕源」：云盘同目录字幕 + 迅雷在线字幕
+ * - 「字幕源」：网盘字幕（同目录自动匹配 + 逐级浏览挑选）、本机字幕文件、迅雷在线字幕
  * - 「样式与同步」：延迟、字号、颜色、字体、粗体、底色
  *
  * @param onStyleChange (新样式, 是否持久化)。拖动滑块过程中只预览不落盘，松手后落盘
@@ -83,13 +88,19 @@ fun SubtitlePickerDialog(
     selectedSubtitleName: String?,
     style: SubtitleStyleState,
     delayMs: Long,
+    browse: SubtitleBrowseState,
     onDismiss: () -> Unit,
     onSelectCloudSubtitle: (FileBean) -> Unit,
     onSelectOnlineSubtitle: (XunleiSubtitleBean) -> Unit,
     onClearSubtitle: () -> Unit,
     onRetrySearch: () -> Unit,
     onStyleChange: (SubtitleStyleState, Boolean) -> Unit,
-    onDelayChange: (Long) -> Unit
+    onDelayChange: (Long) -> Unit,
+    onBrowseStart: () -> Unit,
+    onBrowseOpenFolder: (String) -> Unit,
+    onBrowseUp: () -> Unit,
+    onBrowseExit: () -> Unit,
+    onPickLocalSubtitle: () -> Unit
 ) {
     var tabIndex by rememberSaveable { mutableIntStateOf(0) }
 
@@ -151,10 +162,16 @@ fun SubtitlePickerDialog(
                         isSearchingOnline = isSearchingOnline,
                         searchError = searchError,
                         selectedSubtitleName = selectedSubtitleName,
+                        browse = browse,
                         onSelectCloudSubtitle = onSelectCloudSubtitle,
                         onSelectOnlineSubtitle = onSelectOnlineSubtitle,
                         onClearSubtitle = onClearSubtitle,
-                        onRetrySearch = onRetrySearch
+                        onRetrySearch = onRetrySearch,
+                        onBrowseStart = onBrowseStart,
+                        onBrowseOpenFolder = onBrowseOpenFolder,
+                        onBrowseUp = onBrowseUp,
+                        onBrowseExit = onBrowseExit,
+                        onPickLocalSubtitle = onPickLocalSubtitle
                     )
                 } else {
                     SubtitleStylePanel(
@@ -179,11 +196,29 @@ private fun SubtitleSourceList(
     isSearchingOnline: Boolean,
     searchError: String,
     selectedSubtitleName: String?,
+    browse: SubtitleBrowseState,
     onSelectCloudSubtitle: (FileBean) -> Unit,
     onSelectOnlineSubtitle: (XunleiSubtitleBean) -> Unit,
     onClearSubtitle: () -> Unit,
-    onRetrySearch: () -> Unit
+    onRetrySearch: () -> Unit,
+    onBrowseStart: () -> Unit,
+    onBrowseOpenFolder: (String) -> Unit,
+    onBrowseUp: () -> Unit,
+    onBrowseExit: () -> Unit,
+    onPickLocalSubtitle: () -> Unit
 ) {
+    // 网盘目录浏览模式
+    if (browse.active) {
+        CloudBrowser(
+            browse = browse,
+            onSelect = onSelectCloudSubtitle,
+            onOpenFolder = onBrowseOpenFolder,
+            onUp = onBrowseUp,
+            onExit = onBrowseExit
+        )
+        return
+    }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxWidth()
@@ -217,24 +252,58 @@ private fun SubtitleSourceList(
             }
         }
 
-        // 云盘同目录字幕
+        // 网盘字幕：同目录自动匹配 + 浏览 / 本机文件入口
+        item {
+            SectionHeader(icon = {
+                Icon(
+                    Icons.Default.CloudDownload,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }, title = "网盘字幕")
+        }
         if (cloudSubtitles.isNotEmpty()) {
-            item {
-                SectionHeader(icon = {
-                    Icon(
-                        Icons.Default.CloudDownload,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                }, title = "同目录字幕")
-            }
             items(cloudSubtitles, key = { "cloud_${it.fileId}" }) { fileBean ->
                 SubtitleItem(
                     title = fileBean.name,
-                    subtitle = "115 云盘文件",
+                    subtitle = "同目录 · 与视频同名",
                     onClick = { onSelectCloudSubtitle(fileBean) }
                 )
+            }
+        } else {
+            item {
+                Text(
+                    "同目录未发现同名字幕，可浏览网盘其它目录或选择本机文件",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                )
+            }
+        }
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(onClick = onBrowseStart) {
+                    Icon(
+                        Icons.Default.Folder,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("浏览网盘…")
+                }
+                OutlinedButton(onClick = onPickLocalSubtitle) {
+                    Icon(
+                        Icons.Default.PhoneAndroid,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("本机文件…")
+                }
             }
         }
 
@@ -303,6 +372,145 @@ private fun SubtitleSourceList(
                         }
                     },
                     onClick = { onSelectOnlineSubtitle(bean) }
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 网盘目录浏览：上级 / 面包屑 / 返回列表；列出子文件夹与字幕文件
+ */
+@Composable
+private fun CloudBrowser(
+    browse: SubtitleBrowseState,
+    onSelect: (FileBean) -> Unit,
+    onOpenFolder: (String) -> Unit,
+    onUp: () -> Unit,
+    onExit: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(360.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onUp, enabled = browse.path.size >= 2 && !browse.loading) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "上级目录")
+            }
+            Text(
+                text = browse.path.joinToString(" / ") { it.name }.ifEmpty { "根目录" },
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            TextButton(onClick = onExit) {
+                Text("返回列表", fontSize = 12.sp)
+            }
+        }
+
+        when {
+            browse.loading -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(28.dp))
+                }
+            }
+
+            browse.error.isNotEmpty() -> {
+                Text(
+                    browse.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(12.dp)
+                )
+            }
+
+            else -> {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    items(browse.folders, key = { "d_${it.categoryId}" }) { folder ->
+                        BrowserRow(
+                            icon = Icons.Default.Folder,
+                            title = folder.name,
+                            subtitle = "文件夹",
+                            onClick = { onOpenFolder(folder.categoryId) }
+                        )
+                    }
+                    items(browse.subtitles, key = { "f_${it.fileId}" }) { file ->
+                        BrowserRow(
+                            icon = Icons.Default.Subtitles,
+                            title = file.name,
+                            subtitle = if (file.fileId in browse.matched) "字幕文件 · 与视频同名" else "字幕文件",
+                            onClick = { onSelect(file) }
+                        )
+                    }
+                    if (browse.folders.isEmpty() && browse.subtitles.isEmpty()) {
+                        item {
+                            Text(
+                                "此目录没有子文件夹或字幕文件",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 12.dp),
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BrowserRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        ),
+        shape = RoundedCornerShape(8.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+        ) {
+            Icon(
+                icon,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = MaterialTheme.colorScheme.primary
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.Gray
                 )
             }
         }
