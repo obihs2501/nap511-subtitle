@@ -273,7 +273,7 @@ class VideoActivity : AppCompatActivity() {
     /** 网盘字幕浏览状态 */
     private var browseState by mutableStateOf(SubtitleBrowseState())
 
-    /** 本机字幕文件选择器（srt/ass 的 MIME 各家不一，用 */* 再按扩展名校验） */
+    /** 本机字幕文件选择器：srt/ass 的 MIME 各家不一，用通配 MIME 打开选择器，再按扩展名校验 */
     private val localSubtitlePicker =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
             if (uri != null) loadLocalSubtitle(uri)
