@@ -31,7 +31,6 @@ runtimeLivedata = "1.12.0"
 workRuntimeKtx = "2.11.2"
 xlog = "1.11.1"
 media3DatasourceOkhttp = "1.11.0"
-miuix = "0.9.3"
 
 [libraries]
 android-request-inspector-webview = { module = "com.github.acsbendi:Android-Request-Inspector-WebView", version.ref = "androidRequestInspectorWebview" }
@@ -42,9 +41,6 @@ androidx-constraintlayout = { module = "androidx.constraintlayout:constraintlayo
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 androidx-datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "datastorePreferences" }
 androidx-material3 = { module = "androidx.compose.material3:material3", version.ref = "material3" }
-miuix-ui = { module = "top.yukonga.miuix.kmp:miuix-ui", version.ref = "miuix" }
-miuix-preference = { module = "top.yukonga.miuix.kmp:miuix-preference", version.ref = "miuix" }
-miuix-icons = { module = "top.yukonga.miuix.kmp:miuix-icons", version.ref = "miuix" }
 androidx-navigation-compose = { module = "androidx.navigation:navigation-compose", version.ref = "navigationCompose" }
 androidx-work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version.ref = "workRuntimeKtx" }
 coil-compose = { module = "io.coil-kt:coil-compose", version.ref = "coilCompose" }
