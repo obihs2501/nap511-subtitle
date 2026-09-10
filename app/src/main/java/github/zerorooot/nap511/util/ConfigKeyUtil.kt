@@ -209,5 +209,20 @@ class ConfigKeyUtil {
          * 离线task的标签
          */
         const val OFFLINE_TASK_WORKER = "OfflineTaskWorker"
+
+        /** 字幕字号 (sp) */
+        const val SUBTITLE_TEXT_SIZE = "subtitleTextSize"
+
+        /** 字幕颜色 (ARGB Int) */
+        const val SUBTITLE_TEXT_COLOR = "subtitleTextColor"
+
+        /** 字幕字体 key: default / sans / serif / mono */
+        const val SUBTITLE_FONT = "subtitleFont"
+
+        /** 字幕粗体 */
+        const val SUBTITLE_BOLD = "subtitleBold"
+
+        /** 字幕半透明底色 */
+        const val SUBTITLE_BACKGROUND = "subtitleBackground"
     }
 }

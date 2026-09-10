@@ -19,3 +19,19 @@ data class XunleiSubtitleBean(
     @SerializedName("fingerprintf_score") val fingerprintScore: Double = 0.0,
     @SerializedName("extra_name") val extraName: String = ""
 )
+
+/**
+ * 外挂字幕显示样式（持久化到 DataStore）
+ */
+data class SubtitleStyleState(
+    /** 字号 sp */
+    val textSizeSp: Int = 24,
+    /** 文字颜色 ARGB */
+    val textColor: Int = 0xFFFFFFFF.toInt(),
+    /** 字体 key: default / sans / serif / mono */
+    val fontKey: String = "default",
+    /** 粗体 */
+    val bold: Boolean = false,
+    /** 半透明底色 */
+    val background: Boolean = false
+)

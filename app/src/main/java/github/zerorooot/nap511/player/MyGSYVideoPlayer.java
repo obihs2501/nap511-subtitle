@@ -1,6 +1,7 @@
 package github.zerorooot.nap511.player;
 
 import android.content.Context;
+import android.graphics.Typeface;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.os.BatteryManager;
@@ -65,6 +66,17 @@ public class MyGSYVideoPlayer extends StandardGSYVideoPlayer {
         super.init(context);
         GSYVideoType.setShowType(GSYVideoType.SCREEN_TYPE_DEFAULT);
         initView();
+    }
+
+    /**
+     * 设置外挂字幕字体：GSYSubtitleStyle 不含字体属性，直接作用在字幕 TextView 上。
+     * applyStyle 只改颜色/字号/底色/阴影/位置，不会覆盖 typeface。
+     */
+    public void applySubtitleTypeface(Typeface typeface) {
+        ensureSubtitleController();
+        if (mSubtitleView != null) {
+            mSubtitleView.setTypeface(typeface);
+        }
     }
 
     public void setHideLoadingView(boolean hide) {

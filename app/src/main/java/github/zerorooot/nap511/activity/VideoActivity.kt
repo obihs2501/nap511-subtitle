@@ -72,6 +72,7 @@ import com.shuyu.gsyvideoplayer.player.PlayerFactory
 import com.shuyu.gsyvideoplayer.subtitle.GSYSubtitleSource
 import github.zerorooot.nap511.R
 import github.zerorooot.nap511.bean.FileBean
+import github.zerorooot.nap511.bean.SubtitleStyleState
 import github.zerorooot.nap511.bean.VideoInfoBean
 import github.zerorooot.nap511.bean.XunleiSubtitleBean
 import github.zerorooot.nap511.dialog.SubtitlePickerDialog
@@ -83,6 +84,7 @@ import github.zerorooot.nap511.util.App
 import github.zerorooot.nap511.util.ConfigKeyUtil
 import github.zerorooot.nap511.util.DataStoreUtil
 import github.zerorooot.nap511.util.SubtitleConvertUtil
+import github.zerorooot.nap511.util.SubtitleStyleUtil
 import github.zerorooot.nap511.util.UserSessionManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -261,6 +263,10 @@ class VideoActivity : AppCompatActivity() {
     private var showSubtitleDialog by mutableStateOf(false)
     private var activeSubtitleName by mutableStateOf<String?>(null)
 
+    /** 字幕样式（持久化）与延迟（仅本次播放） */
+    private var subtitleStyle by mutableStateOf(SubtitleStyleState())
+    private var subtitleDelayMs by mutableStateOf(0L)
+
     /** 视频所在目录的 cid，用于查找同目录字幕（getVideoInfo 已把真实 pid 写入 VideoInfoBean.parentId） */
     private val videoParentCid: String by lazy { videoInfo.parentId }
 
@@ -272,6 +278,9 @@ class VideoActivity : AppCompatActivity() {
             autoJumpRetry = DataStoreUtil.getDataSuspend(ConfigKeyUtil.AUTO_JUMP_RETRY, true)
             val hideLoading = DataStoreUtil.getDataSuspend(ConfigKeyUtil.HIDE_LOADING_VIEW, false)
             videoPlayer.setHideLoadingView(hideLoading)
+            // 读取并应用字幕样式
+            subtitleStyle = SubtitleStyleUtil.load()
+            applySubtitleStyle(subtitleStyle)
         }
         setContentView(R.layout.activity_video)
         val headerMap = hashMapOf(
@@ -347,6 +356,8 @@ class VideoActivity : AppCompatActivity() {
                         isSearchingOnline = isSearchingOnline,
                         searchError = searchError,
                         selectedSubtitleName = activeSubtitleName,
+                        style = subtitleStyle,
+                        delayMs = subtitleDelayMs,
                         onDismiss = { showSubtitleDialog = false },
                         onSelectCloudSubtitle = { fileBean ->
                             showSubtitleDialog = false
@@ -360,7 +371,18 @@ class VideoActivity : AppCompatActivity() {
                             showSubtitleDialog = false
                             clearSubtitle()
                         },
-                        onRetrySearch = { prepareSubtitleCandidates() }
+                        onRetrySearch = { prepareSubtitleCandidates() },
+                        onStyleChange = { newStyle, persist ->
+                            subtitleStyle = newStyle
+                            applySubtitleStyle(newStyle)
+                            if (persist) {
+                                lifecycleScope.launch { SubtitleStyleUtil.save(newStyle) }
+                            }
+                        },
+                        onDelayChange = { ms ->
+                            subtitleDelayMs = ms
+                            applySubtitleDelay(ms)
+                        }
                     )
                 }
             }
@@ -711,12 +733,34 @@ class VideoActivity : AppCompatActivity() {
                     android.net.Uri.fromFile(srtFile).toString()
                 ).setLabel(file.name).build()
                 // setSubtitleSource 内部仅做 UI 操作，切回主线程
-                withContext(Dispatchers.Main) { videoPlayer.setSubtitleSource(source) }
+                withContext(Dispatchers.Main) {
+                    videoPlayer.setSubtitleSource(source)
+                    // 字幕控制器可能被重建，重新套用样式与延迟
+                    applySubtitleStyle(subtitleStyle)
+                    applySubtitleDelay(subtitleDelayMs)
+                }
                 true
             }.onFailure {
                 XLog.e("挂载字幕失败: ${file.name}", it)
             }.getOrDefault(false)
         }
+
+    /** 应用字幕样式：字号/颜色/底色走 GSYSubtitleStyle，字体直接设到字幕 TextView */
+    private fun applySubtitleStyle(style: SubtitleStyleState) {
+        runCatching {
+            videoPlayer.setSubtitleStyle(SubtitleStyleUtil.toGsyStyle(style))
+            videoPlayer.applySubtitleTypeface(SubtitleStyleUtil.toTypeface(style))
+        }.onFailure { XLog.e("应用字幕样式失败", it) }
+    }
+
+    /**
+     * 字幕延迟：UI 语义为正值=字幕推后显示。
+     * GSY 的 offset 语义相反（sourcePosition = position + offset，正值=提前），故取负。
+     */
+    private fun applySubtitleDelay(delayMs: Long) {
+        runCatching { videoPlayer.setSubtitleOffsetMs(-delayMs) }
+            .onFailure { XLog.e("设置字幕延迟失败", it) }
+    }
 
     private fun clearSubtitle() {
         runCatching { videoPlayer.setSubtitleSource(null) }
