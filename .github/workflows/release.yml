@@ -60,14 +60,14 @@ jobs:
           path.chmod(0o600)
           PY
 
-      # 只在这一个普通构建任务内运行 JVM 单测；不启动模拟器或额外虚拟机。
+      # 使用 AGP 默认提供的 JVM 单测变体，不打包 Debug APK；最终仅 assembleRelease。
       - name: Test and build signed Release APK
         env:
           NAP511_SIGNING_STORE_FILE: ${{ runner.temp }}/nap511-release.jks
           NAP511_SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           NAP511_SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           NAP511_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: ./gradlew testReleaseUnitTest assembleRelease --stacktrace
+        run: ./gradlew testDebugUnitTest assembleRelease --stacktrace
 
       - name: Upload unit test reports
         if: always()
@@ -75,8 +75,8 @@ jobs:
         with:
           name: release-unit-test-reports
           path: |
-            app/build/reports/tests/testReleaseUnitTest/
-            app/build/test-results/testReleaseUnitTest/
+            app/build/reports/tests/testDebugUnitTest/
+            app/build/test-results/testDebugUnitTest/
           if-no-files-found: ignore
           retention-days: 3
 
