@@ -20,3 +20,4 @@ app/release/
 # 本地构建产物
 app-debug.apk
 *.apk
+lib/

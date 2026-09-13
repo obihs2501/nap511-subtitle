@@ -8,16 +8,33 @@
 
 # 截图
 
-<table>
-  <tr style="text-align: center; vertical-align: middle;">
-    <td><a href="./assets/01.jpg"><img src="./assets/01.jpg?raw=true" width="300" alt="Screenshot 001"/></a></td>
-    <td><a href="./assets/02.jpg"><img src="./assets/02.jpg?raw=true" width="300" alt="Screenshot 002"/></a></td>
-    <td><a href="./assets/03.jpg"><img src="./assets/03.jpg?raw=true" width="300" alt="Screenshot 003"/></a></td>
+<table style="text-align: center; vertical-align: middle; width: 1200px; table-layout: fixed;">
+  <tr><td colspan="2">
+      <a href="./assets/01.jpg"><img src="./assets/01.jpg?raw=true" width="300" alt="Screenshot 001"/></a>
+    </td>
+    <td colspan="2">
+      <a href="./assets/02.jpg"><img src="./assets/02.jpg?raw=true" width="300" alt="Screenshot 002"/></a>
+    </td>
+    <td colspan="2">
+      <a href="./assets/03.jpg"><img src="./assets/03.jpg?raw=true" width="300" alt="Screenshot 003"/></a>
+    </td>
   </tr>
-  <tr style="text-align: center; vertical-align: middle;">
-    <td><a href="./assets/04.jpg"><img src="./assets/04.jpg?raw=true" width="300" alt="Screenshot 004"/></a></td>
-    <td><a href="./assets/05.jpg"><img src="./assets/05.jpg?raw=true" width="300" alt="Screenshot 005"/></a></td>
-    <td><a href="./assets/06.jpg"><img src="./assets/06.jpg?raw=true" width="300" alt="Screenshot 006"/></a></td>
+  <tr><td colspan="2">
+      <a href="./assets/04.jpg"><img src="./assets/04.jpg?raw=true" width="300" alt="Screenshot 004"/></a>
+    </td>
+    <td colspan="2">
+      <a href="./assets/05.jpg"><img src="./assets/05.jpg?raw=true" width="300" alt="Screenshot 005"/></a>
+    </td>
+    <td colspan="2">
+      <a href="./assets/06.jpg"><img src="./assets/06.jpg?raw=true" width="300" alt="Screenshot 006"/></a>
+    </td>
+  </tr>
+  <tr><td colspan="3">
+      <a href="./assets/07.jpg"><img src="./assets/07.jpg?raw=true" width="600" alt="Screenshot 007"/></a>
+    </td>
+    <td colspan="3">
+      <a href="./assets/08.jpg"><img src="./assets/08.jpg?raw=true" width="600" alt="Screenshot 008"/></a>
+    </td>
   </tr>
 </table>
 
@@ -96,4 +113,4 @@ Windows 开发时可运行 `python tools/check_subtitle_icu.py`，用系统 ICU 
 
 ### 1.6.1 上游同步
 
-已合并 `zerorooot/nap511` 的 `d329818`：设置仓库与状态流重构、强类型菜单、新版设置 / 大屏配置、图片高清瀑布流、通知 / 电池优化引导及离线任务改进。保留本分支的字幕与播放器扩展，并迁移到上游的 `SettingsRepository`。
+已合并 `zerorooot/nap511` 的 `aac7223`：设置仓库与状态流重构、强类型菜单、新版设置 / 大屏配置、图片高清瀑布流、通知 / 电池优化引导及离线任务改进。保留本分支的字幕与播放器扩展，并迁移到上游的 `SettingsRepository`。
