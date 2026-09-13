@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -19,6 +20,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -28,6 +31,7 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Subtitles
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -36,6 +40,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -55,8 +60,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -85,6 +93,8 @@ fun SubtitlePickerDialog(
     onlineSubtitles: List<XunleiSubtitleBean>,
     isSearchingOnline: Boolean,
     searchError: String,
+    searchKeyword: String,
+    searchedKeyword: String,
     selectedSubtitleName: String?,
     style: SubtitleStyleState,
     delayMs: Long,
@@ -93,7 +103,9 @@ fun SubtitlePickerDialog(
     onSelectCloudSubtitle: (FileBean) -> Unit,
     onSelectOnlineSubtitle: (XunleiSubtitleBean) -> Unit,
     onClearSubtitle: () -> Unit,
-    onRetrySearch: () -> Unit,
+    onSearchKeywordChange: (String) -> Unit,
+    onSearchOnline: () -> Unit,
+    onUseVideoNameSearch: () -> Unit,
     onStyleChange: (SubtitleStyleState, Boolean) -> Unit,
     onDelayChange: (Long) -> Unit,
     onBrowseStart: () -> Unit,
@@ -161,12 +173,16 @@ fun SubtitlePickerDialog(
                         onlineSubtitles = onlineSubtitles,
                         isSearchingOnline = isSearchingOnline,
                         searchError = searchError,
+                        searchKeyword = searchKeyword,
+                        searchedKeyword = searchedKeyword,
                         selectedSubtitleName = selectedSubtitleName,
                         browse = browse,
                         onSelectCloudSubtitle = onSelectCloudSubtitle,
                         onSelectOnlineSubtitle = onSelectOnlineSubtitle,
                         onClearSubtitle = onClearSubtitle,
-                        onRetrySearch = onRetrySearch,
+                        onSearchKeywordChange = onSearchKeywordChange,
+                        onSearchOnline = onSearchOnline,
+                        onUseVideoNameSearch = onUseVideoNameSearch,
                         onBrowseStart = onBrowseStart,
                         onBrowseOpenFolder = onBrowseOpenFolder,
                         onBrowseUp = onBrowseUp,
@@ -195,18 +211,33 @@ private fun SubtitleSourceList(
     onlineSubtitles: List<XunleiSubtitleBean>,
     isSearchingOnline: Boolean,
     searchError: String,
+    searchKeyword: String,
+    searchedKeyword: String,
     selectedSubtitleName: String?,
     browse: SubtitleBrowseState,
     onSelectCloudSubtitle: (FileBean) -> Unit,
     onSelectOnlineSubtitle: (XunleiSubtitleBean) -> Unit,
     onClearSubtitle: () -> Unit,
-    onRetrySearch: () -> Unit,
+    onSearchKeywordChange: (String) -> Unit,
+    onSearchOnline: () -> Unit,
+    onUseVideoNameSearch: () -> Unit,
     onBrowseStart: () -> Unit,
     onBrowseOpenFolder: (String) -> Unit,
     onBrowseUp: () -> Unit,
     onBrowseExit: () -> Unit,
     onPickLocalSubtitle: () -> Unit
 ) {
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val searchingCurrentKeyword = isSearchingOnline && searchKeyword.trim() == searchedKeyword
+    val submitSearch: () -> Unit = {
+        if (searchKeyword.isNotBlank()) {
+            focusManager.clearFocus()
+            keyboardController?.hide()
+            onSearchOnline()
+        }
+    }
+
     // 网盘目录浏览模式
     if (browse.active) {
         CloudBrowser(
@@ -222,7 +253,7 @@ private fun SubtitleSourceList(
     LazyColumn(
         modifier = Modifier
             .fillMaxWidth()
-            .height(360.dp),
+            .heightIn(max = 360.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         // 当前生效字幕
@@ -318,6 +349,55 @@ private fun SubtitleSourceList(
                 )
             }, title = "在线字幕（迅雷）")
         }
+        item(key = "online_search") {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                OutlinedTextField(
+                    value = searchKeyword,
+                    onValueChange = onSearchKeywordChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("字幕搜索关键词") },
+                    placeholder = { Text("输入片名、剧名或集数") },
+                    singleLine = true,
+                    trailingIcon = {
+                        if (searchKeyword.isNotEmpty()) {
+                            IconButton(onClick = { onSearchKeywordChange("") }) {
+                                Icon(Icons.Default.Close, contentDescription = "清空关键词")
+                            }
+                        }
+                    },
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = { submitSearch() })
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Button(
+                        onClick = submitSearch,
+                        enabled = searchKeyword.isNotBlank() && !searchingCurrentKeyword
+                    ) {
+                        Text(if (searchingCurrentKeyword) "搜索中…" else "搜索")
+                    }
+                    TextButton(onClick = {
+                        focusManager.clearFocus()
+                        keyboardController?.hide()
+                        onUseVideoNameSearch()
+                    }) {
+                        Text("用视频名搜索")
+                    }
+                }
+                if (searchedKeyword.isNotEmpty()) {
+                    Text(
+                        text = "搜索关键词：$searchedKeyword",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
 
         if (isSearchingOnline) {
             item {
@@ -343,7 +423,7 @@ private fun SubtitleSourceList(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error
                     )
-                    TextButton(onClick = onRetrySearch) {
+                    TextButton(onClick = submitSearch, enabled = searchKeyword.isNotBlank()) {
                         Text("重试")
                     }
                 }
@@ -351,7 +431,7 @@ private fun SubtitleSourceList(
         } else if (onlineSubtitles.isEmpty()) {
             item {
                 Text(
-                    "未找到在线字幕",
+                    "未找到在线字幕，试试修改片名或集数后搜索",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier

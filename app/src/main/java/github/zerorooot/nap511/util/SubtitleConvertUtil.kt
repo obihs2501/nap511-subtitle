@@ -2,162 +2,175 @@ package github.zerorooot.nap511.util
 
 import com.elvishew.xlog.XLog
 import java.io.File
+import java.nio.ByteBuffer
 import java.nio.charset.Charset
 import java.nio.charset.CodingErrorAction
+import java.util.Locale
 
 /**
- * 轻量字幕解析工具：把 srt / ass / ssa / vtt 统一转换为 GSYSubtitleCue 列表
- *
- * GSY 13.2.1 内置字幕控制器只支持 SRT 与 WebVTT 两种文本格式，
- * 这里补充 ASS/SSA 的解析，并输出为兼容的临时 .srt 文件，
- * 使 GSY 内置渲染管线可以直接挂载。
+ * 为 GSY 准备 UTF-8 字幕：ASS/SSA 转成 SRT，SRT/WebVTT 保留各自的格式。
+ * 不覆盖原文件，避免重编码或同名字幕转换影响正在播放的字幕。
  */
 object SubtitleConvertUtil {
+    private val defaultAssFields = listOf(
+        "layer", "start", "end", "style", "name",
+        "marginl", "marginr", "marginv", "effect", "text"
+    )
+    private val assEventsHeader = Regex("""(?im)^\s*\[events]\s*$""")
+    private val srtTiming = Regex("""(?m)^\s*\d+:\d{2}:\d{2}[,.]\d+\s+-->""")
+    private val assTime = Regex("""(\d+):(\d{1,2}):(\d{1,2})(?:[.,](\d+))?""")
+    private val assOverride = Regex("""\{[^}]*}""")
+    private val drawingMode = Regex("""\\p(\d+)""")
 
     /**
-     * 把任意支持的字幕文件转换为 UTF-8 的 .srt 文件，返回转换后的文件
-     * srt/vtt 可能是 GBK 编码，也统一重编码为 UTF-8 后输出
+     * 文件名和在线接口的扩展名可能缺失或不准确，优先识别实际内容。
+     * 返回可供播放器加载的文件；空文件、无有效台词或不支持的格式返回 null。
      */
-    fun convertToSrt(source: File, outputDir: File): File? {
-        return runCatching {
-            val ext = source.extension.lowercase()
-            when (ext) {
-                "srt" -> reEncodeAsUtf8(source, outputDir)
-                "vtt", "webvtt" -> reEncodeAsUtf8(source, outputDir)
-                "ass", "ssa" -> convertAssToSrt(source, outputDir)
-                else -> null
-            }
-        }.onFailure {
-            XLog.e("SubtitleConvertUtil convertToSrt 失败: ${source.name}", it)
-        }.getOrNull()
-    }
+    fun prepareForPlayback(source: File, outputDir: File): File? = runCatching {
+        val bytes = source.readBytes()
+        val text = bytes.toString(detectCharset(bytes))
+            .removePrefix("\uFEFF")
+            .replace("\r\n", "\n")
+            .replace('\r', '\n')
+        if (text.isBlank()) return@runCatching null
 
-    /**
-     * 统一转存为 UTF-8 编码的 .srt 文件
-     */
-    private fun reEncodeAsUtf8(source: File, outputDir: File): File? {
-        val text = source.readText(charset = detectCharset(source))
-        if (text.isBlank()) return null
-        if (!outputDir.exists()) outputDir.mkdirs()
-        val target = File(outputDir, source.nameWithoutExtension + ".srt")
-        target.writeText(text, Charsets.UTF_8)
-        return target
-    }
+        val extension = when {
+            assEventsHeader.containsMatchIn(text) -> "ass"
+            text.trimStart().startsWith("WEBVTT") -> "vtt"
+            srtTiming.containsMatchIn(text) -> "srt"
+            else -> source.extension.lowercase(Locale.ROOT)
+        }
+        val (outputText, outputExtension) = when (extension) {
+            "ass", "ssa" -> (convertAssToSrt(text) ?: return@runCatching null) to "srt"
+            "srt" -> text to "srt"
+            // WebVTT 不能只改名成 .srt，否则 GSY 会选错解析器。
+            "vtt", "webvtt" -> text to "vtt"
+            else -> return@runCatching null
+        }
+        if (!outputDir.exists()) check(outputDir.mkdirs()) { "无法创建字幕缓存目录" }
+        File.createTempFile("subtitle_", ".$outputExtension", outputDir).apply {
+            writeText(outputText, Charsets.UTF_8)
+        }
+    }.onFailure {
+        XLog.e("SubtitleConvertUtil prepareForPlayback 失败: ${source.name}", it)
+    }.getOrNull()
 
-    /**
-     * ASS/SSA -> SRT：
-     * 1. 提取 [Events] 段中的 Dialogue 行
-     * 2. 解析 Format 行拿到字段顺序（Layer,Start,End,Style,Name,MarginL,...,Text）
-     * 3. 去除内联标签 {\...}，\N 与 \n 换行
-     */
-    private fun convertAssToSrt(source: File, outputDir: File): File? {
-        val text = source.readText(charset = detectCharset(source))
-        val lines = text.replace("\r\n", "\n").replace('\r', '\n').split("\n")
+    private data class AssCue(val startMs: Long, val endMs: Long, val text: String)
 
+    private fun convertAssToSrt(text: String): String? {
         var inEvents = false
-        var formatFields: List<String> = emptyList()
+        var fields = defaultAssFields
         val cues = mutableListOf<AssCue>()
 
-        for (line in lines) {
+        for (line in text.lineSequence()) {
             val trimmed = line.trim()
+            if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+                inEvents = trimmed.equals("[Events]", ignoreCase = true)
+                fields = defaultAssFields
+                continue
+            }
+            if (!inEvents || ':' !in trimmed) continue
+            val record = trimmed.substringBefore(':').trim()
+            val body = trimmed.substringAfter(':').trimStart()
             when {
-                trimmed.startsWith("[Events]") -> {
-                    inEvents = true
+                record.equals("Format", ignoreCase = true) -> {
+                    fields = body.split(',').map { it.trim().lowercase(Locale.ROOT) }
                 }
-                trimmed.startsWith("[") && trimmed.endsWith("]") -> {
-                    inEvents = false
-                }
-                inEvents && trimmed.startsWith("Format:") -> {
-                    formatFields = trimmed.removePrefix("Format:")
-                        .split(",").map { it.trim().lowercase() }
-                }
-                inEvents && trimmed.startsWith("Dialogue:") -> {
-                    val body = trimmed.removePrefix("Dialogue:")
-                    if (formatFields.isEmpty()) {
-                        // 无 Format 行时按 Aegisub 默认顺序
-                        formatFields = listOf(
-                            "layer", "start", "end", "style", "name",
-                            "marginl", "marginr", "marginv", "effect", "text"
-                        )
-                    }
-                    // 前 n-1 个字段按逗号切分，剩余全部并入 Text（Text 内可含逗号）
-                    val parts = body.split(",", limit = formatFields.size)
-                    if (parts.size == formatFields.size) {
-                        val map = formatFields.mapIndexed { i, f -> f to parts[i] }.toMap()
-                        val start = map["start"] ?: continue
-                        val end = map["end"] ?: continue
-                        val plainText = cleanAssText(parts.last())
-                        if (plainText.isNotBlank()) {
-                            cues.add(AssCue(start, end, plainText))
-                        }
-                    }
+                record.equals("Dialogue", ignoreCase = true) -> {
+                    val startIndex = fields.indexOf("start")
+                    val endIndex = fields.indexOf("end")
+                    val textIndex = fields.indexOf("text")
+                    if (startIndex < 0 || endIndex < 0 || textIndex < 0) continue
+                    val parts = splitAssFields(body, fields.size, textIndex) ?: continue
+                    val start = parseAssTime(parts[startIndex]) ?: continue
+                    val end = parseAssTime(parts[endIndex]) ?: continue
+                    if (end <= start) continue
+                    val plainText = cleanAssText(parts[textIndex])
+                    if (plainText.isNotBlank()) cues.add(AssCue(start, end, plainText))
                 }
             }
         }
         if (cues.isEmpty()) return null
 
-        if (!outputDir.exists()) outputDir.mkdirs()
-        val target = File(outputDir, source.nameWithoutExtension + ".srt")
-        target.writeText(buildSrt(cues), Charsets.UTF_8)
-        return target
+        // ASS 事件不一定按时间排列。同一时段的双语台词合并，避免只显示其中一条。
+        val orderedCues = cues.groupBy { it.startMs to it.endMs }.values.map { group ->
+            group.first().copy(text = group.map { it.text }.distinct().joinToString("\n"))
+        }.sortedWith(compareBy<AssCue> { it.startMs }.thenBy { it.endMs })
+        return buildString {
+            orderedCues.forEachIndexed { index, cue ->
+                append(index + 1).append('\n')
+                append(srtTime(cue.startMs)).append(" --> ").append(srtTime(cue.endMs))
+                append('\n').append(cue.text).append("\n\n")
+            }
+        }
     }
 
-    private data class AssCue(val start: String, val end: String, val text: String)
+    /** Text 中允许逗号；即使 Format 调整字段顺序，也只把多出的逗号归入 Text。 */
+    private fun splitAssFields(body: String, fieldCount: Int, textIndex: Int): List<String>? {
+        val parts = body.split(',')
+        if (parts.size < fieldCount) return null
+        val textEnd = textIndex + parts.size - fieldCount + 1
+        return parts.take(textIndex) +
+            parts.subList(textIndex, textEnd).joinToString(",") + parts.drop(textEnd)
+    }
 
     private fun cleanAssText(raw: String): String {
-        return raw
-            .replace(Regex("\\{[^}]*}"), "")   // 去除 {\...} 标签
-            .replace("\\N", "\n")
-            .replace("\\n", "\n")
-            .replace(Regex("<[^>]*>"), "")      // 去除残留 HTML 标签
-            .trim()
-    }
-
-    private fun buildSrt(cues: List<AssCue>): String {
-        val sb = StringBuilder()
-        cues.forEachIndexed { index, cue ->
-            sb.append(index + 1).append('\n')
-            sb.append(assTimeToSrtTime(cue.start)).append(" --> ")
-                .append(assTimeToSrtTime(cue.end)).append('\n')
-            sb.append(cue.text).append("\n\n")
-        }
-        return sb.toString()
-    }
-
-    /**
-     * ASS 时间 H:MM:SS.cc (百分之一秒) -> SRT 时间 HH:MM:SS,mmm
-     */
-    private fun assTimeToSrtTime(assTime: String): String {
-        val cleaned = assTime.trim()
-        val parts = cleaned.split(":")
-        if (parts.size != 3) return "00:00:00,000"
-        val hours = parts[0].trim().padStart(2, '0')
-        val minutes = parts[1].trim().padStart(2, '0')
-        val secParts = parts[2].split(".")
-        val seconds = secParts.getOrNull(0)?.trim()?.padStart(2, '0') ?: "00"
-        val centis = secParts.getOrNull(1)?.trim()?.padEnd(2, '0')?.take(2) ?: "00"
-        val millis = (centis + "0").take(3)
-        return "$hours:$minutes:$seconds,$millis"
-    }
-
-    /**
-     * 简易编码探测：中文环境常见 GBK 字幕，先尝试 UTF-8 严格解码，失败则回退 GBK
-     */
-    fun detectCharset(file: File): Charset {
-        return runCatching {
-            val bytes = file.readBytes()
-            // UTF-8 BOM
-            if (bytes.size >= 3 && bytes[0] == 0xEF.toByte() && bytes[1] == 0xBB.toByte() && bytes[2] == 0xBF.toByte()) {
-                return Charsets.UTF_8
+        // \p1 等绘图指令后的坐标不是台词，直到 \p0 才恢复文本模式。
+        var drawing = false
+        var position = 0
+        val plain = buildString {
+            for (tag in assOverride.findAll(raw)) {
+                if (!drawing) append(raw.substring(position, tag.range.first))
+                drawingMode.findAll(tag.value).lastOrNull()?.let {
+                    drawing = it.groupValues[1].any { digit -> digit != '0' }
+                }
+                position = tag.range.last + 1
             }
-            // 严格 UTF-8 解码测试
-            val decoder = Charsets.UTF_8.newDecoder()
-                .onMalformedInput(CodingErrorAction.REPORT)
-                .onUnmappableCharacter(CodingErrorAction.REPORT)
-            decoder.decode(java.nio.ByteBuffer.wrap(bytes))
-            Charsets.UTF_8
-        }.getOrElse {
-            Charset.forName("GBK")
+            if (!drawing) append(raw.substring(position))
+        }
+        return plain.replace("\\N", "\n").replace("\\n", "\n").replace("\\h", " ")
+            .lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.joinToString("\n")
+    }
+
+    /** 支持 ASS 百分秒及常见毫秒写法；坏时间戳只丢弃该条，不使整份字幕转换失败。 */
+    private fun parseAssTime(value: String): Long? {
+        val match = assTime.matchEntire(value.trim()) ?: return null
+        val hours = match.groupValues[1].toLongOrNull() ?: return null
+        val minutes = match.groupValues[2].toLongOrNull() ?: return null
+        val seconds = match.groupValues[3].toLongOrNull() ?: return null
+        if (minutes !in 0L..59L || seconds !in 0L..59L ||
+            hours > (Long.MAX_VALUE - 3_599_999L) / 3_600_000L
+        ) return null
+        val millis = match.groupValues[4].take(3).padEnd(3, '0').toLong()
+        return hours * 3_600_000L + minutes * 60_000L + seconds * 1000L + millis
+    }
+
+    private fun srtTime(ms: Long): String = String.format(
+        Locale.ROOT, "%02d:%02d:%02d,%03d",
+        ms / 3_600_000, ms / 60_000 % 60, ms / 1000 % 60, ms % 1000
+    )
+
+    fun detectCharset(file: File): Charset = detectCharset(file.readBytes())
+
+    /** 先检查 BOM，再严格解码 UTF-8，最后用兼容 GBK/GB2312 的 GB18030。 */
+    private fun detectCharset(bytes: ByteArray): Charset {
+        fun startsWith(vararg prefix: Int): Boolean = bytes.size >= prefix.size &&
+            prefix.indices.all { (bytes[it].toInt() and 0xFF) == prefix[it] }
+
+        return when {
+            // UTF-32 LE 的 BOM 包含 UTF-16 LE 的前缀，必须先检查。
+            startsWith(0xFF, 0xFE, 0x00, 0x00) -> Charset.forName("UTF-32LE")
+            startsWith(0x00, 0x00, 0xFE, 0xFF) -> Charset.forName("UTF-32BE")
+            startsWith(0xFF, 0xFE) -> Charsets.UTF_16LE
+            startsWith(0xFE, 0xFF) -> Charsets.UTF_16BE
+            startsWith(0xEF, 0xBB, 0xBF) -> Charsets.UTF_8
+            else -> runCatching {
+                Charsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(bytes))
+                Charsets.UTF_8
+            }.getOrElse { Charset.forName("GB18030") }
         }
     }
 }

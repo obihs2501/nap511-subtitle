@@ -11,11 +11,13 @@ import github.zerorooot.nap511.bean.FilesBean
 import github.zerorooot.nap511.bean.PathBean
 import github.zerorooot.nap511.bean.XunleiSubtitleBean
 import github.zerorooot.nap511.util.NetworkClient
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.Request
 import java.io.File
 import java.io.IOException
+import java.util.Locale
 
 /**
  * 字幕来源：
@@ -29,6 +31,19 @@ class SubtitleRepository {
         /** 支持的字幕文件扩展名 */
         val SUBTITLE_EXTENSIONS = listOf("srt", "ass", "ssa", "vtt", "webvtt", "sub")
 
+        /** 在线接口常把文件名和扩展名分开返回，下载时补齐，且不重复追加扩展名。 */
+        internal fun downloadFileName(fileName: String, fileExtension: String): String {
+            val safeName = fileName.trim().replace(Regex("[\\\\/:*?\"<>|]"), "_")
+                .takeUnless { it.isBlank() || it == "." || it == ".." } ?: "subtitle"
+            val extension = fileExtension.trim().removePrefix(".").lowercase(Locale.ROOT)
+            val existingExtension = safeName.substringAfterLast('.', "").lowercase(Locale.ROOT)
+            return if (extension in SUBTITLE_EXTENSIONS && existingExtension !in SUBTITLE_EXTENSIONS) {
+                "$safeName.$extension"
+            } else {
+                safeName
+            }
+        }
+
         @Volatile
         private var INSTANCE: SubtitleRepository? = null
         fun getInstance(): SubtitleRepository {
@@ -38,11 +53,6 @@ class SubtitleRepository {
         }
     }
 
-    /** 上次在线搜索是否因网络/接口异常失败（区别于"无结果"） */
-    @Volatile
-    var lastSearchFailed: Boolean = false
-        private set
-
     private val gson = Gson()
 
     /**
@@ -50,11 +60,10 @@ class SubtitleRepository {
      * 响应为包裹对象 {code, result, data:[...]}；做防御式解析，
      * 兼容直接返回裸数组 [ {...}, ... ] 的历史形态
      */
-    suspend fun searchOnlineSubtitles(videoName: String): List<XunleiSubtitleBean> {
-        lastSearchFailed = false
-        return withContext(Dispatchers.IO) {
+    suspend fun searchOnlineSubtitles(keyword: String): Result<List<XunleiSubtitleBean>> =
+        withContext(Dispatchers.IO) {
             runCatching {
-                val url = "$XUNLEI_SUBTITLE_API?name=${java.net.URLEncoder.encode(videoName, "UTF-8")}"
+                val url = "$XUNLEI_SUBTITLE_API?name=${java.net.URLEncoder.encode(keyword.trim(), "UTF-8")}"
                 val request = Request.Builder().url(url).get().build()
                 val response = NetworkClient.sharedOkHttpClient.newCall(request).execute()
                 response.use {
@@ -73,11 +82,11 @@ class SubtitleRepository {
                     }
                 }
             }.onFailure {
-                lastSearchFailed = true
+                // 取消的旧搜索不能被当成网络失败，更不能污染新搜索的错误状态。
+                if (it is CancellationException) throw it
                 XLog.e("SubtitleRepository searchOnlineSubtitles 失败", it)
-            }.getOrElse { emptyList() }
+            }
         }
-    }
 
     /**
      * 在 115 网盘同目录中查找与视频匹配的字幕文件
@@ -185,7 +194,8 @@ class SubtitleRepository {
     suspend fun downloadSubtitle(
         subtitleUrl: String,
         fileName: String,
-        cacheDir: File
+        cacheDir: File,
+        fileExtension: String = ""
     ): File? {
         return withContext(Dispatchers.IO) {
             runCatching {
@@ -194,7 +204,7 @@ class SubtitleRepository {
                 response.use { resp ->
                     if (!resp.isSuccessful) throw IOException("字幕下载失败: ${resp.code}")
                     if (!cacheDir.exists()) cacheDir.mkdirs()
-                    val safeName = fileName.replace(Regex("[\\\\/:*?\"<>|]"), "_")
+                    val safeName = downloadFileName(fileName, fileExtension)
                     val target = File(cacheDir, safeName)
                     target.outputStream().use { out ->
                         resp.body.byteStream().copyTo(out)

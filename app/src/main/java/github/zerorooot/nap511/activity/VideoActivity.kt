@@ -90,6 +90,8 @@ import github.zerorooot.nap511.util.SubtitleConvertUtil
 import github.zerorooot.nap511.util.SubtitleStyleUtil
 import github.zerorooot.nap511.util.UserSessionManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.Interceptor
@@ -263,6 +265,9 @@ class VideoActivity : AppCompatActivity() {
     private var isSearchingOnline by mutableStateOf(false)
     private var isSearchingCloud by mutableStateOf(false)
     private var searchError by mutableStateOf("")
+    private var subtitleSearchKeyword by mutableStateOf("")
+    private var lastOnlineSearchKeyword by mutableStateOf<String?>(null)
+    private var onlineSearchJob: Job? = null
     private var showSubtitleDialog by mutableStateOf(false)
     private var activeSubtitleName by mutableStateOf<String?>(null)
 
@@ -303,6 +308,7 @@ class VideoActivity : AppCompatActivity() {
             videoInfo.downloadUrl
         }
         val title = videoInfo.fileName
+        subtitleSearchKeyword = title
         videoPlayer = findViewById(R.id.pre_video_player)
 
         initGSYExoPlayerWithOkHttp(this.applicationContext)
@@ -367,6 +373,8 @@ class VideoActivity : AppCompatActivity() {
                         onlineSubtitles = onlineSubtitleCandidates,
                         isSearchingOnline = isSearchingOnline,
                         searchError = searchError,
+                        searchKeyword = subtitleSearchKeyword,
+                        searchedKeyword = lastOnlineSearchKeyword.orEmpty(),
                         selectedSubtitleName = activeSubtitleName,
                         style = subtitleStyle,
                         delayMs = subtitleDelayMs,
@@ -387,7 +395,9 @@ class VideoActivity : AppCompatActivity() {
                             showSubtitleDialog = false
                             clearSubtitle()
                         },
-                        onRetrySearch = { prepareSubtitleCandidates() },
+                        onSearchKeywordChange = { subtitleSearchKeyword = it },
+                        onSearchOnline = { searchOnlineSubtitles() },
+                        onUseVideoNameSearch = { searchOnlineSubtitles(videoInfo.fileName) },
                         onStyleChange = { newStyle, persist ->
                             subtitleStyle = newStyle
                             applySubtitleStyle(newStyle)
@@ -656,7 +666,8 @@ class VideoActivity : AppCompatActivity() {
         if (videoParentCid.isNotEmpty() && cloudSubtitleCandidates.isEmpty() && !isSearchingCloud) {
             searchCloudSubtitles()
         }
-        searchOnlineSubtitles()
+        // 重开弹窗保留手动关键词和结果，不再悄悄恢复按视频名搜索。
+        if (lastOnlineSearchKeyword == null) searchOnlineSubtitles()
     }
 
     /**
@@ -691,22 +702,29 @@ class VideoActivity : AppCompatActivity() {
         }
     }
 
-    private fun searchOnlineSubtitles() {
-        if (isSearchingOnline) return
+    private fun searchOnlineSubtitles(keyword: String = subtitleSearchKeyword) {
+        val query = keyword.trim()
+        if (query.isEmpty()) {
+            searchError = "请输入字幕搜索关键词"
+            return
+        }
+        subtitleSearchKeyword = query
+        if (isSearchingOnline && lastOnlineSearchKeyword == query) return
+
+        // 允许搜索过程中换关键词；被取消的旧请求不能覆盖新请求的结果。
+        onlineSearchJob?.cancel()
+        lastOnlineSearchKeyword = query
         isSearchingOnline = true
         searchError = ""
-        lifecycleScope.launch {
-            val result = subtitleRepository.searchOnlineSubtitles(videoInfo.fileName)
-            onlineSubtitleCandidates.clear()
-            onlineSubtitleCandidates.addAll(result)
-            if (result.isEmpty()) {
-                searchError = if (subtitleRepository.lastSearchFailed) {
-                    "在线字幕搜索失败，请检查网络"
-                } else {
-                    ""
-                }
+        onlineSubtitleCandidates.clear()
+        onlineSearchJob = lifecycleScope.launch {
+            try {
+                subtitleRepository.searchOnlineSubtitles(query)
+                    .onSuccess { onlineSubtitleCandidates.addAll(it) }
+                    .onFailure { searchError = "在线字幕搜索失败，请检查网络后重试" }
+            } finally {
+                if (isActive) isSearchingOnline = false
             }
-            isSearchingOnline = false
         }
     }
 
@@ -733,7 +751,7 @@ class VideoActivity : AppCompatActivity() {
     private fun loadOnlineSubtitle(bean: XunleiSubtitleBean) {
         lifecycleScope.launch {
             val localFile = subtitleRepository.downloadSubtitle(
-                bean.url, bean.name, subtitleCacheDir
+                bean.url, bean.name, subtitleCacheDir, fileExtension = bean.ext
             )
             val mounted = localFile != null && mountSubtitleFile(localFile)
             if (mounted) {
@@ -752,10 +770,10 @@ class VideoActivity : AppCompatActivity() {
     private suspend fun mountSubtitleFile(file: File): Boolean =
         withContext(Dispatchers.IO) {
             runCatching {
-                val srtFile = SubtitleConvertUtil.convertToSrt(file, subtitleCacheDir)
+                val playbackFile = SubtitleConvertUtil.prepareForPlayback(file, subtitleCacheDir)
                     ?: return@withContext false
                 val source = GSYSubtitleSource.Builder(
-                    android.net.Uri.fromFile(srtFile).toString()
+                    android.net.Uri.fromFile(playbackFile).toString()
                 ).setLabel(file.name).build()
                 // setSubtitleSource 内部仅做 UI 操作，切回主线程
                 withContext(Dispatchers.Main) {
