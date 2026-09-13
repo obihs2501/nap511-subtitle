@@ -224,8 +224,9 @@ public class MyGSYVideoPlayer extends StandardGSYVideoPlayer {
             pressY = event.getY();
             boolean eligible = mCurrentState == CURRENT_STATE_PLAYING && !mLockCurScreen
                     && event.getPointerCount() == 1 && !touches(mTopContainer, event)
-                    && !touches(mBottomContainer, event) && !touches(mLockScreen, event)
-                    && !touches(mStartButton, event);
+                    && !touches(mBottomContainer, event) && !touches(mLockScreen, event);
+            // The central play overlay is still part of the video: holding it must accelerate,
+            // while a short tap continues to use its normal play/pause click handler.
             holdGesture.down(pressX, pressY, eligible);
             if (eligible) postDelayed(activateHoldSpeed, ViewConfiguration.getLongPressTimeout());
         } else if (action == MotionEvent.ACTION_MOVE) {
