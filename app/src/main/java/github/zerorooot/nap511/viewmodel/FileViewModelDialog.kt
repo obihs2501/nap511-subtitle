@@ -25,10 +25,6 @@ internal fun FileViewModel.openFileOrderDialog() {
     activeDialog = FileDialogState.FileOrder
 }
 
-internal fun FileViewModel.openAria2Dialog() {
-    activeDialog = FileDialogState.Aria2
-}
-
 internal fun FileViewModel.openUnzipAllFileDialog() {
     activeDialog = FileDialogState.UnzipAllFile
 }
@@ -57,8 +53,6 @@ internal fun FileViewModel.closeRenameFileDialog() = closeDialog()
 internal fun FileViewModel.closeFileInfoDialog() = closeDialog()
 
 internal fun FileViewModel.closeFileOrderDialog() = closeDialog()
-
-internal fun FileViewModel.closeAria2Dialog() = closeDialog()
 
 internal fun FileViewModel.closeUnzipDialog() = closeDialog()
 

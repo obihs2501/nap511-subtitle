@@ -15,6 +15,9 @@ sealed interface Route {
     data object MyFile : Route
 
     @Serializable
+    data object LocalDownloads : Route
+
+    @Serializable
     data object OfflineDownload : Route
 
     @Serializable

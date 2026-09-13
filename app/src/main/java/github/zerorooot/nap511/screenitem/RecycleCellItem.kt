@@ -27,6 +27,7 @@ import coil.request.CachePolicy
 import coil.request.ImageRequest
 import coil.size.Scale
 import github.zerorooot.nap511.bean.RecycleBean
+import github.zerorooot.nap511.screen.MenuItemAction
 import github.zerorooot.nap511.screen.RecycleMoreMenu
 
 @Composable
@@ -34,7 +35,7 @@ fun RecycleCellItem(
     recycleBean: RecycleBean, //删除会有动画
     modifier: Modifier,
     index: Int,
-    menuOnClick: (String, Int) -> Unit
+    menuOnClick: (MenuItemAction, Int) -> Unit
 ) {
     val image = recycleBean.fileIco
     val name = recycleBean.fileName
@@ -63,9 +64,6 @@ fun RecycleCellItem(
                     AsyncImage(
                         model = ImageRequest.Builder(LocalContext.current)
                             .data(imageData)
-                            .memoryCachePolicy(CachePolicy.ENABLED)
-                            .diskCachePolicy(CachePolicy.ENABLED)
-                            .networkCachePolicy(CachePolicy.ENABLED)
                             .memoryCacheKey(recycleBean.id)
                             .diskCacheKey(recycleBean.id)
                             .scale(Scale.FILL)
@@ -123,8 +121,8 @@ fun RecycleCellItem(
                     }
                 }
 
-                RecycleMoreMenu() { itemName, _ ->
-                    menuOnClick.invoke(itemName, index)
+                RecycleMoreMenu { itemAction, _ ->
+                    menuOnClick.invoke(itemAction, index)
                 }
 
             }

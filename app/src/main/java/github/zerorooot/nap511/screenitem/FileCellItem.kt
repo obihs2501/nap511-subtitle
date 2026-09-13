@@ -39,11 +39,14 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import coil.request.CachePolicy
+import coil.imageLoader
 import coil.request.ImageRequest
+import com.elvishew.xlog.XLog
 import github.zerorooot.nap511.R
 import github.zerorooot.nap511.bean.FileBean
 import github.zerorooot.nap511.screen.FileMoreMenu
+import github.zerorooot.nap511.screen.MenuItemAction
+import github.zerorooot.nap511.util.getCoilCacheUrl
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -59,15 +62,13 @@ fun FileCellItem(
     onDelete: ((Int) -> Unit)? = null,
     onRename: ((Int) -> Unit)? = null,
     onFileInfo: ((Int) -> Unit)? = null,
-    onAria2Download: ((Int) -> Unit)? = null,
+    onDownload: ((Int) -> Unit)? = null,
     onForceOpen: ((Int) -> Unit)? = null,
 ) {
     val image = fileBean.fileIco
     val name = fileBean.name
     val size = fileBean.sizeString
     val time = fileBean.createTimeString
-    val playLong = fileBean.playLongString
-    val imageData = fileBean.photoThumb.ifEmpty { image }
     Surface(
         shape = MaterialTheme.shapes.medium,
         tonalElevation = 10.dp,
@@ -108,12 +109,15 @@ fun FileCellItem(
                             contentDescription = "File Photo",
                         )
                     } else {
+                        val context = LocalContext.current
+                        val imageLoader = context.imageLoader
+
+                        val imageData = getCoilCacheUrl(imageLoader, fileBean.fileId)
+                            ?: fileBean.photoThumb.ifEmpty { image }
+
                         AsyncImage(
-                            model = ImageRequest.Builder(LocalContext.current)
+                            model = ImageRequest.Builder(context)
                                 .data(imageData)
-                                .memoryCachePolicy(CachePolicy.ENABLED)
-                                .diskCachePolicy(CachePolicy.ENABLED)
-                                .networkCachePolicy(CachePolicy.ENABLED)
                                 .memoryCacheKey(fileBean.fileId)
                                 .diskCacheKey(fileBean.fileId)
                                 .scale(coil.size.Scale.FILL)
@@ -121,6 +125,9 @@ fun FileCellItem(
                                 .error(image) // 加载失败时也显示占位图
                                 .crossfade(true)
                                 .build(),
+                            onSuccess = { successState ->
+                                XLog.d("FileCellItem [图片加载成功] index=$index, name=${fileBean.name}, imageData=$imageData, source=${successState.result.dataSource}")
+                            },
                             contentDescription = "File Thumbnail",
                             modifier = Modifier.size(60.dp), // 用 size 替代 height + width
                             contentScale = ContentScale.Fit
@@ -158,6 +165,7 @@ fun FileCellItem(
                         )
                         // 时长（作为独立 Badge 标签凸显）
                         if (fileBean.isVideo == 1 || fileBean.fileIco == R.drawable.mp3) {
+                            val playLong = fileBean.playLongString
                             Box(
                                 modifier = Modifier
                                     .background(
@@ -185,14 +193,15 @@ fun FileCellItem(
                     }
                 }
 
-                val dispatchMenuClick: (String, Int) -> Unit = { name, _ ->
-                    when (name) {
-                        "剪切文件" -> onCut?.invoke(index)
-                        "删除文件" -> onDelete?.invoke(index)
-                        "重新命名" -> onRename?.invoke(index)
-                        "文件信息" -> onFileInfo?.invoke(index)
-                        "Aria2下载" -> onAria2Download?.invoke(index)
-                        "强行打开" -> onForceOpen?.invoke(index)
+                val dispatchMenuClick: (MenuItemAction, Int) -> Unit = { action, _ ->
+                    when (action) {
+                        MenuItemAction.CUT_FILE -> onCut?.invoke(index)
+                        MenuItemAction.DELETE_FILE -> onDelete?.invoke(index)
+                        MenuItemAction.RENAME_FILE -> onRename?.invoke(index)
+                        MenuItemAction.FILE_INFO -> onFileInfo?.invoke(index)
+                        MenuItemAction.DOWNLOAD_FILE -> onDownload?.invoke(index)
+                        MenuItemAction.FORCE_OPEN -> onForceOpen?.invoke(index)
+                        else -> {}
                     }
                 }
                 FileMoreMenu(onClick = dispatchMenuClick)

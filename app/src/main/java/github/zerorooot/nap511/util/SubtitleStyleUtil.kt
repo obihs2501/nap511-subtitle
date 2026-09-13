@@ -4,6 +4,7 @@ import android.graphics.Color
 import android.graphics.Typeface
 import com.shuyu.gsyvideoplayer.subtitle.GSYSubtitleStyle
 import github.zerorooot.nap511.bean.SubtitleStyleState
+import github.zerorooot.nap511.repository.SettingsRepository
 
 /**
  * 字幕样式：预设项、持久化、转换为 GSY 样式 / Typeface
@@ -57,20 +58,20 @@ object SubtitleStyleUtil {
         entry.filter { it.isDigit() }.toIntOrNull()?.coerceIn(MIN_SIZE, MAX_SIZE) ?: DEFAULT_SIZE
 
     suspend fun load(): SubtitleStyleState = SubtitleStyleState(
-        textSizeSp = DataStoreUtil.getDataSuspend(ConfigKeyUtil.SUBTITLE_TEXT_SIZE, DEFAULT_SIZE)
+        textSizeSp = SettingsRepository.getDataSuspend(ConfigKeyUtil.SUBTITLE_TEXT_SIZE, DEFAULT_SIZE)
             .coerceIn(MIN_SIZE, MAX_SIZE),
-        textColor = DataStoreUtil.getDataSuspend(ConfigKeyUtil.SUBTITLE_TEXT_COLOR, DEFAULT_COLOR),
-        fontKey = DataStoreUtil.getDataSuspend(ConfigKeyUtil.SUBTITLE_FONT, DEFAULT_FONT),
-        bold = DataStoreUtil.getDataSuspend(ConfigKeyUtil.SUBTITLE_BOLD, false),
-        background = DataStoreUtil.getDataSuspend(ConfigKeyUtil.SUBTITLE_BACKGROUND, false)
+        textColor = SettingsRepository.getDataSuspend(ConfigKeyUtil.SUBTITLE_TEXT_COLOR, DEFAULT_COLOR),
+        fontKey = SettingsRepository.getDataSuspend(ConfigKeyUtil.SUBTITLE_FONT, DEFAULT_FONT),
+        bold = SettingsRepository.getDataSuspend(ConfigKeyUtil.SUBTITLE_BOLD, false),
+        background = SettingsRepository.getDataSuspend(ConfigKeyUtil.SUBTITLE_BACKGROUND, false)
     )
 
     suspend fun save(style: SubtitleStyleState) {
-        DataStoreUtil.putDataSuspend(ConfigKeyUtil.SUBTITLE_TEXT_SIZE, style.textSizeSp)
-        DataStoreUtil.putDataSuspend(ConfigKeyUtil.SUBTITLE_TEXT_COLOR, style.textColor)
-        DataStoreUtil.putDataSuspend(ConfigKeyUtil.SUBTITLE_FONT, style.fontKey)
-        DataStoreUtil.putDataSuspend(ConfigKeyUtil.SUBTITLE_BOLD, style.bold)
-        DataStoreUtil.putDataSuspend(ConfigKeyUtil.SUBTITLE_BACKGROUND, style.background)
+        SettingsRepository.saveData(ConfigKeyUtil.SUBTITLE_TEXT_SIZE, style.textSizeSp)
+        SettingsRepository.saveData(ConfigKeyUtil.SUBTITLE_TEXT_COLOR, style.textColor)
+        SettingsRepository.saveData(ConfigKeyUtil.SUBTITLE_FONT, style.fontKey)
+        SettingsRepository.saveData(ConfigKeyUtil.SUBTITLE_BOLD, style.bold)
+        SettingsRepository.saveData(ConfigKeyUtil.SUBTITLE_BACKGROUND, style.background)
     }
 
     /** 转为 GSY 内置字幕样式（字体不在其中，见 [toTypeface]） */

@@ -92,7 +92,7 @@ fun SwitchPreferenceItem(
     )
 }
 
-// 3. 弹窗输入选项（如：修改 uid、password、aria2地址等）
+// 3. 弹窗输入选项（如：修改 uid、password 等）
 @Composable
 fun EditTextPreferenceItem(
     title: String,

@@ -67,11 +67,16 @@ import github.zerorooot.nap511.bean.AvatarBean
 import github.zerorooot.nap511.bean.DrawerMenuItem
 import github.zerorooot.nap511.bean.NavEvent
 import github.zerorooot.nap511.bean.Route
+import github.zerorooot.nap511.bean.SettingUiState
 import github.zerorooot.nap511.dialog.ExitApp
+import github.zerorooot.nap511.repository.AuthRepository
+import github.zerorooot.nap511.repository.SettingsRepository
 import github.zerorooot.nap511.screen.CaptchaVideoWebViewScreen
 import github.zerorooot.nap511.screen.CaptchaWebViewScreen
 import github.zerorooot.nap511.screen.CreateDialogs
 import github.zerorooot.nap511.screen.FileScreen
+import github.zerorooot.nap511.screen.LocalDownloadsScreen
+import github.zerorooot.nap511.screen.HtmlWebViewScreen
 import github.zerorooot.nap511.screen.LogScreen
 import github.zerorooot.nap511.screen.LoginCredential
 import github.zerorooot.nap511.screen.LoginScreen
@@ -82,14 +87,12 @@ import github.zerorooot.nap511.screen.OfflineFileScreen
 import github.zerorooot.nap511.screen.RecycleScreen
 import github.zerorooot.nap511.screen.RepeatFileScreen
 import github.zerorooot.nap511.screen.SettingScreen
-import github.zerorooot.nap511.screen.HtmlWebViewScreen
 import github.zerorooot.nap511.screen.TxtReaderScreen
 import github.zerorooot.nap511.screen.WebViewScreen
 import github.zerorooot.nap511.screenitem.Avatar
 import github.zerorooot.nap511.ui.theme.Nap511Theme
 import github.zerorooot.nap511.util.App
 import github.zerorooot.nap511.util.ConfigKeyUtil
-import github.zerorooot.nap511.util.DataStoreUtil
 import github.zerorooot.nap511.viewmodel.AudioViewModel
 import github.zerorooot.nap511.viewmodel.FileViewModel
 import github.zerorooot.nap511.viewmodel.OfflineFileViewModel
@@ -108,10 +111,12 @@ class MainActivity : AppCompatActivity() {
         initializeViewTreeOwners()
         enableEdgeToEdge()
         setContent {
-            val dynamicColor by DataStoreUtil.getDataFlow(ConfigKeyUtil.DYNAMIC_COLOR, true)
-                .collectAsStateWithLifecycle(initialValue = true)
-            val themeMode by DataStoreUtil.getDataFlow(ConfigKeyUtil.THEME_MODE, "跟随系统")
-                .collectAsStateWithLifecycle(initialValue = "跟随系统")
+            val settingsRepository = SettingsRepository.getInstance()
+            val initialUiState = remember { settingsRepository.settingUiStateFlow.value }
+            val settingUiState by settingsRepository.settingUiStateFlow
+                .collectAsStateWithLifecycle(initialValue = initialUiState)
+            val dynamicColor = settingUiState.dynamicColorEnabled
+            val themeMode = settingUiState.themeMode
 
             val darkTheme = when (themeMode) {
                 "亮色模式" -> false
@@ -147,7 +152,7 @@ class MainActivity : AppCompatActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background,
                 ) {
-                    Init()
+                    Init(settingUiState = settingUiState)
                 }
             }
         }
@@ -155,7 +160,9 @@ class MainActivity : AppCompatActivity() {
 
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
-    private fun Init() {
+    private fun Init(
+        settingUiState: SettingUiState
+    ) {
         //初始化
         val fileViewModel: FileViewModel = viewModel()
         val offlineFileViewModel: OfflineFileViewModel = viewModel()
@@ -169,11 +176,6 @@ class MainActivity : AppCompatActivity() {
 
         LaunchedEffect(Unit) {
             fileViewModel.loadCacheFile()
-            //允许通知， 方便离线下载交互 OfflineTaskActivity
-            if (!App.instance.isNotificationEnabled(this@MainActivity)) {
-                App.instance.toast("检测到未开启通知权限，为保证交互效果，建议开启")
-                App.instance.goToNotificationSetting(this@MainActivity)
-            }
             //检测添加的离线链接。防止因为种种原因，app添加离线链接，但链接没有上传到115
             fileViewModel.handleOfflineTask()
 
@@ -207,10 +209,11 @@ class MainActivity : AppCompatActivity() {
             audioViewModel,
             repeatViewModel,
             settingViewModel,
+            settingUiState,
             navController
         )
 
-        CreateDialogs(fileViewModel) {
+        CreateDialogs(fileViewModel, settingUiState) {
             navController.navigate(it)
         }
 
@@ -240,13 +243,14 @@ class MainActivity : AppCompatActivity() {
         audioViewModel: AudioViewModel,
         repeatViewModel: RepeatFileViewModel,
         settingViewModel: SettingViewModel,
+        uiState: SettingUiState,
         navController: NavHostController
     ) {
         val drawerState = rememberDrawerState(DrawerValue.Closed)
         val scope = rememberCoroutineScope()
 
         val remainingSpaceBean = fileViewModel.remainingSpace
-        val avatarJson by DataStoreUtil.getDataFlow(ConfigKeyUtil.AVATAR_BEAN, "{}")
+        val avatarJson by SettingsRepository.getDataFlow(ConfigKeyUtil.AVATAR_BEAN, "{}")
             .collectAsStateWithLifecycle(initialValue = "{}")
         val avatarBean = remember(avatarJson) {
             try {
@@ -259,25 +263,16 @@ class MainActivity : AppCompatActivity() {
         // 记录上一次触发返回的时间戳
         var lastBackPressTime by remember { mutableLongStateOf(0L) }
 
-        val isExpandedConfig by DataStoreUtil.getDataFlow(ConfigKeyUtil.EXPANDED_SCREEN, true)
-            .collectAsStateWithLifecycle(initialValue = true)
-        val expandedScreenThresholdStr by DataStoreUtil.getDataFlow(
-            ConfigKeyUtil.EXPANDED_SCREEN_THRESHOLD,
-            "600"
-        ).collectAsStateWithLifecycle(initialValue = "600")
+        val isExpandedConfig = uiState.expandedScreenEnabled
+
         val expandedScreenThreshold =
-            expandedScreenThresholdStr.toInt().takeIf { i -> i > 0 } ?: 600
+            uiState.expandedScreenThreshold.toIntOrNull()?.takeIf { i -> i > 0 } ?: 600
 
         val isExpandedScreen =
             (LocalConfiguration.current.screenWidthDp >= expandedScreenThreshold) && isExpandedConfig
 
-        val gridCellMinSizeStr by DataStoreUtil.getDataFlow(
-            ConfigKeyUtil.GRID_CELL_MIN_SIZE,
-            "340"
-        ).collectAsStateWithLifecycle(initialValue = "340")
-        val gridCellMinSize = remember(gridCellMinSizeStr) {
-            (gridCellMinSizeStr.toInt().takeIf { i -> i > 0 } ?: 340).dp
-        }
+        val gridCellMinSize =
+            (uiState.gridCellMinSize.toIntOrNull()?.takeIf { i -> i > 0 } ?: 340).dp
 
 
         // 监听当前导航栈顶的路由，用于高亮显示 Drawer 中选中的 Item
@@ -302,8 +297,7 @@ class MainActivity : AppCompatActivity() {
                 App.instance.toast("再滑一次返回桌面")
             }
         }
-        val isLogEnabled by DataStoreUtil.getDataFlow(ConfigKeyUtil.LOG, false)
-            .collectAsStateWithLifecycle(initialValue = false)
+        val isLogEnabled = uiState.logEnabled
 
         val menuItems = remember(isLogEnabled) {
             arrayListOf(
@@ -318,6 +312,7 @@ class MainActivity : AppCompatActivity() {
                     Icons.Default.CloudDone, ConfigKeyUtil.OFFLINE_LIST, Route.OfflineList
                 ),
 
+                DrawerMenuItem(Icons.Default.CloudDownload, "本机下载", Route.LocalDownloads),
                 DrawerMenuItem(Icons.Default.Web, ConfigKeyUtil.WEB, Route.WebScreen),
                 DrawerMenuItem(
                     Icons.Default.Delete, ConfigKeyUtil.RECYCLE_BIN, Route.RecycleBin
@@ -401,12 +396,13 @@ class MainActivity : AppCompatActivity() {
                     composable<Route.Login> {
                         navGesturesEnabled = false
                         Login {
+                            fileViewModel.getRemainingSpace()
+                            fileViewModel.getFiles("0")
                             navController.navigate(Route.MyFile) {
                                 popUpTo<Route.Login> {
                                     inclusive = true
                                 }
                             }
-                            fileViewModel.getFiles("0")
                         }
                     }
 
@@ -414,6 +410,7 @@ class MainActivity : AppCompatActivity() {
                         navGesturesEnabled = true
                         FileScreen(
                             fileViewModel,
+                            uiState,
                             audioViewModel,
                             isExpandedScreen,
                             gridCellMinSize,
@@ -432,6 +429,10 @@ class MainActivity : AppCompatActivity() {
                             }
                             return@FileScreen open
                         }
+                    }
+
+                    composable<Route.LocalDownloads> {
+                        LocalDownloadsScreen(onBack = { navController.popBackStack() })
                     }
 
                     composable<Route.OfflineDownload> {
@@ -675,7 +676,10 @@ class MainActivity : AppCompatActivity() {
                     is LoginCredential.Cookie -> {
                         val replace = credential.cookieString.replace(" ", "")
                             .replace("[\r\n]".toRegex(), "")
-                        App.instance.checkLogin(replace)
+                        AuthRepository.checkLogin(replace)
+                            .onSuccess { App.instance.toast("登录成功～") }
+                            .onFailure { App.instance.toast("验证失败: ${it.localizedMessage}") }
+                            .isSuccess
                     }
 
                     is LoginCredential.ConfigFile -> {
@@ -690,17 +694,17 @@ class MainActivity : AppCompatActivity() {
                                 if (element.isJsonPrimitive) {
                                     val primitive = element.asJsonPrimitive
                                     when {
-                                        primitive.isBoolean -> DataStoreUtil.putDataSuspend(
+                                        primitive.isBoolean -> SettingsRepository.saveData(
                                             key,
                                             primitive.asBoolean
                                         )
 
-                                        primitive.isString -> DataStoreUtil.putDataSuspend(
+                                        primitive.isString -> SettingsRepository.saveData(
                                             key,
                                             primitive.asString
                                         )
 
-                                        primitive.isNumber -> DataStoreUtil.putDataSuspend(
+                                        primitive.isNumber -> SettingsRepository.saveData(
                                             key,
                                             primitive.asNumber
                                         )
@@ -708,10 +712,16 @@ class MainActivity : AppCompatActivity() {
                                 }
                             }
                             val cookie = jsonObject.get(ConfigKeyUtil.COOKIE).asString
-                            App.instance.checkLogin(cookie)
+                            AuthRepository.checkLogin(cookie)
+                                .onSuccess { App.instance.toast("登录成功～") }
+                                .onFailure { App.instance.toast("验证失败: ${it.localizedMessage}") }
+                                .isSuccess
                         } catch (e: Exception) {
                             App.instance.toast("解析配置失败")
-                            XLog.e("LoginScreen LoginCredential.ConfigFile jsonString ${credential.rawJson}", e)
+                            XLog.e(
+                                "LoginScreen LoginCredential.ConfigFile jsonString ${credential.rawJson}",
+                                e
+                            )
                             false
                         }
                     }

@@ -45,9 +45,10 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.acsbendi.requestinspectorwebview.RequestInspectorWebViewClient
 import com.acsbendi.requestinspectorwebview.WebViewRequest
 import com.elvishew.xlog.XLog
+import github.zerorooot.nap511.repository.AuthRepository
+import github.zerorooot.nap511.repository.SettingsRepository
 import github.zerorooot.nap511.util.App
 import github.zerorooot.nap511.util.ConfigKeyUtil
-import github.zerorooot.nap511.util.DataStoreUtil
 import github.zerorooot.nap511.util.NetworkClient
 import github.zerorooot.nap511.util.UserSessionManager
 import kotlinx.coroutines.launch
@@ -201,7 +202,7 @@ fun WebViewScreen(onClick: () -> Unit) {
         val cookieManager = CookieManager.getInstance()
         cookieManager.setAcceptCookie(true)
         WebView.setWebContentsDebuggingEnabled(
-            DataStoreUtil.getDataSuspend(
+            SettingsRepository.getDataSuspend(
                 ConfigKeyUtil.LOG, false
             )
         )
@@ -396,7 +397,9 @@ fun loginWebViewClient(webView: WebView): WebViewClient {
 
             if (cookie != null) {
                 kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                    App.instance.checkLogin(cookie)
+                    AuthRepository.checkLogin(cookie)
+                        .onSuccess { App.instance.toast("登录成功～") }
+                        .onFailure { App.instance.toast("验证失败: ${it.localizedMessage}") }
                 }
             }
             return super.shouldInterceptRequest(view, webViewRequest)

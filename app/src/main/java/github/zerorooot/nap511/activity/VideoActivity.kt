@@ -90,7 +90,7 @@ import github.zerorooot.nap511.repository.SubtitleRepository
 import github.zerorooot.nap511.ui.theme.Nap511Theme
 import github.zerorooot.nap511.util.App
 import github.zerorooot.nap511.util.ConfigKeyUtil
-import github.zerorooot.nap511.util.DataStoreUtil
+import github.zerorooot.nap511.repository.SettingsRepository
 import github.zerorooot.nap511.util.SubtitleConvertUtil
 import github.zerorooot.nap511.util.PlaybackUtil
 import github.zerorooot.nap511.util.SubtitleStyleUtil
@@ -257,8 +257,8 @@ class VideoActivity : AppCompatActivity() {
     }
 
 
-    private var videoLinkMode = false
-    private var autoJumpRetry = true
+    private val videoLinkMode: Boolean get() = videoInfo.videoLinkMode
+    private val autoJumpRetry: Boolean get() = videoInfo.autoJumpRetry
     private var showEpisodeDialog by mutableStateOf(false)
     private var showPlaybackSettings by mutableStateOf(false)
     private var episodeFiles by mutableStateOf<List<FileBean>>(emptyList())
@@ -322,21 +322,18 @@ class VideoActivity : AppCompatActivity() {
         }.getOrNull() ?: run { finish(); return }
         setContentView(R.layout.activity_video)
         videoPlayer = findViewById(R.id.pre_video_player)
+        videoPlayer.setHideLoadingView(videoInfo.hideLoading)
         lifecycleScope.launch {
-            videoLinkMode = DataStoreUtil.getDataSuspend(ConfigKeyUtil.VIDEO_LINK_MODE, false)
-            autoJumpRetry = DataStoreUtil.getDataSuspend(ConfigKeyUtil.AUTO_JUMP_RETRY, true)
-            val hideLoading = DataStoreUtil.getDataSuspend(ConfigKeyUtil.HIDE_LOADING_VIEW, false)
-            videoPlayer.setHideLoadingView(hideLoading)
             // 读取并应用字幕样式
             subtitleStyle = SubtitleStyleUtil.load()
             applySubtitleStyle(subtitleStyle)
-            playbackSpeed = DataStoreUtil.getDataSuspend(ConfigKeyUtil.PLAYER_SPEED, 1f)
+            playbackSpeed = SettingsRepository.getDataSuspend(ConfigKeyUtil.PLAYER_SPEED, 1f)
                 .takeIf { it in PlaybackUtil.SPEEDS } ?: 1f
-            holdSpeed = DataStoreUtil.getDataSuspend(ConfigKeyUtil.PLAYER_HOLD_SPEED, 2f)
+            holdSpeed = SettingsRepository.getDataSuspend(ConfigKeyUtil.PLAYER_HOLD_SPEED, 2f)
                 .takeIf { it in PlaybackUtil.HOLD_SPEEDS } ?: 2f
-            seekStepSeconds = DataStoreUtil.getDataSuspend(ConfigKeyUtil.PLAYER_SEEK_STEP, 15L)
+            seekStepSeconds = SettingsRepository.getDataSuspend(ConfigKeyUtil.PLAYER_SEEK_STEP, 15L)
                 .takeIf { it in PlaybackUtil.SEEK_STEPS } ?: 15L
-            autoPlayNext = DataStoreUtil.getDataSuspend(ConfigKeyUtil.PLAYER_AUTO_NEXT, false)
+            autoPlayNext = SettingsRepository.getDataSuspend(ConfigKeyUtil.PLAYER_AUTO_NEXT, false)
             videoPlayer.setPlaybackSpeed(playbackSpeed)
             videoPlayer.setLongPressSpeed(holdSpeed)
             videoPlayer.setSeekStepSeconds(seekStepSeconds)
@@ -381,10 +378,6 @@ class VideoActivity : AppCompatActivity() {
                 back()
             }
             //字幕选择入口
-            findViewById<View>(R.id.subtitleButton).setOnClickListener {
-                showSubtitleDialog = true
-                prepareSubtitleCandidates()
-            }
             findViewById<View>(R.id.subtitleButtonFullscreen).setOnClickListener {
                 showSubtitleDialog = true
                 prepareSubtitleCandidates()
@@ -406,9 +399,9 @@ class VideoActivity : AppCompatActivity() {
             )
         )
         subtitleComposeView.setContent {
-            val dynamicColor by DataStoreUtil.getDataFlow(ConfigKeyUtil.DYNAMIC_COLOR, true)
+            val dynamicColor by SettingsRepository.getDataFlow(ConfigKeyUtil.DYNAMIC_COLOR, true)
                 .collectAsStateWithLifecycle(initialValue = true)
-            val themeMode by DataStoreUtil.getDataFlow(ConfigKeyUtil.THEME_MODE, "跟随系统")
+            val themeMode by SettingsRepository.getDataFlow(ConfigKeyUtil.THEME_MODE, "跟随系统")
                 .collectAsStateWithLifecycle(initialValue = "跟随系统")
             val darkTheme = when (themeMode) {
                 "亮色模式" -> false
@@ -434,12 +427,12 @@ class VideoActivity : AppCompatActivity() {
                         onHoldSpeed = {
                             holdSpeed = it
                             videoPlayer.setLongPressSpeed(it)
-                            lifecycleScope.launch { DataStoreUtil.putDataSuspend(ConfigKeyUtil.PLAYER_HOLD_SPEED, it) }
+                            lifecycleScope.launch { SettingsRepository.saveData(ConfigKeyUtil.PLAYER_HOLD_SPEED, it) }
                         },
                         onSeekStep = {
                             seekStepSeconds = it
                             videoPlayer.setSeekStepSeconds(it)
-                            lifecycleScope.launch { DataStoreUtil.putDataSuspend(ConfigKeyUtil.PLAYER_SEEK_STEP, it) }
+                            lifecycleScope.launch { SettingsRepository.saveData(ConfigKeyUtil.PLAYER_SEEK_STEP, it) }
                         },
                         onAutoNext = { changeAutoNext(it) }, onTimer = { setSleepTimer(it) },
                         onStopAfterEpisode = { enabled ->
@@ -797,12 +790,12 @@ class VideoActivity : AppCompatActivity() {
     private fun changePlaybackSpeed(value: Float) {
         playbackSpeed = value
         videoPlayer.setPlaybackSpeed(value)
-        lifecycleScope.launch { DataStoreUtil.putDataSuspend(ConfigKeyUtil.PLAYER_SPEED, value) }
+        lifecycleScope.launch { SettingsRepository.saveData(ConfigKeyUtil.PLAYER_SPEED, value) }
     }
 
     private fun changeAutoNext(value: Boolean) {
         autoPlayNext = value
-        lifecycleScope.launch { DataStoreUtil.putDataSuspend(ConfigKeyUtil.PLAYER_AUTO_NEXT, value) }
+        lifecycleScope.launch { SettingsRepository.saveData(ConfigKeyUtil.PLAYER_AUTO_NEXT, value) }
     }
 
     private fun setSleepTimer(minutes: Int) {
@@ -952,13 +945,17 @@ class VideoActivity : AppCompatActivity() {
                     FileRepository.getInstance().video(file.pickCode).copy(
                         pickCode = file.pickCode, fileName = file.name,
                         parentId = file.parentId.ifEmpty { previous.parentId },
-                        fileId = file.fileId, index = -1, isAutoRotate = previous.isAutoRotate
+                        fileId = file.fileId, index = -1, isAutoRotate = previous.isAutoRotate,
+                        videoLinkMode = previous.videoLinkMode, autoJumpRetry = previous.autoJumpRetry,
+                        hideLoading = previous.hideLoading
                     )
                 } else {
                     VideoInfoBean(
                         pickCode = file.pickCode, fileName = file.name,
                         parentId = file.parentId.ifEmpty { previous.parentId }, fileId = file.fileId,
                         width = previous.width, height = previous.height, isAutoRotate = previous.isAutoRotate,
+                        videoLinkMode = previous.videoLinkMode, autoJumpRetry = previous.autoJumpRetry,
+                        hideLoading = previous.hideLoading,
                         videoUrl = "http://115.com/api/video/m3u8/${file.pickCode}.m3u8"
                     )
                 }

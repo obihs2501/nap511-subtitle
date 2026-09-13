@@ -41,7 +41,7 @@ import github.zerorooot.nap511.screenitem.PreferenceItem
 import github.zerorooot.nap511.screenitem.SwitchPreferenceItem
 import github.zerorooot.nap511.util.App
 import github.zerorooot.nap511.util.ConfigKeyUtil
-import github.zerorooot.nap511.util.DataStoreUtil
+import github.zerorooot.nap511.repository.SettingsRepository
 import github.zerorooot.nap511.util.SubtitleStyleUtil
 import github.zerorooot.nap511.util.UserSessionManager
 import github.zerorooot.nap511.viewmodel.SettingViewModel
@@ -248,22 +248,11 @@ fun SettingContent(
                     )
                 }
 
-                // --- 2. 下载与 Aria2 ---
-                item { PreferenceCategoryHeader("下载与 Aria2") }
+                item { PreferenceCategoryHeader("本机下载与离线任务") }
                 item {
-                    EditTextPreferenceItem(
-                        title = "Aria2 RPC 地址",
-                        summary = uiState.aria2Url,
-                        value = uiState.aria2Url,
-                        onValueSave = { onSaveConfig(ConfigKeyUtil.ARIA2_URL, it) }
-                    )
-                }
-                item {
-                    EditTextPreferenceItem(
-                        title = "Aria2 授权密钥",
-                        summary = uiState.aria2Token.ifEmpty { "未设置（若无密码请留空）" },
-                        value = uiState.aria2Token,
-                        onValueSave = { onSaveConfig(ConfigKeyUtil.ARIA2_TOKEN, it) }
+                    PreferenceItem(
+                        title = "内置下载",
+                        summary = "文件菜单选择“下载到本机”，在侧栏“本机下载”查看进度；保存到 Download/nap511，无需配置外部下载器"
                     )
                 }
                 item {
@@ -324,6 +313,14 @@ fun SettingContent(
                 }
                 item {
                     SwitchPreferenceItem(
+                        title = "隐藏电池提醒",
+                        summary = "关闭首页弹出的后台电池优化提醒 Banner",
+                        checked = uiState.hideBatteryBanner,
+                        onCheckedChange = { onSaveConfig(ConfigKeyUtil.HIDE_BATTERY_BANNER, it) }
+                    )
+                }
+                item {
+                    SwitchPreferenceItem(
                         title = "自动跳转重试",
                         summary = "未开启“视频解析模式”时生效。若播放提示“视频地址错误”，自动重新解析并获取正确链接",
                         checked = uiState.autoJumpRetry,
@@ -343,7 +340,7 @@ fun SettingContent(
                 // --- 字幕样式 ---
                 item { PreferenceCategoryHeader("字幕样式") }
                 item {
-                    val size by DataStoreUtil.getDataFlow(
+                    val size by SettingsRepository.getDataFlow(
                         ConfigKeyUtil.SUBTITLE_TEXT_SIZE, SubtitleStyleUtil.DEFAULT_SIZE
                     ).collectAsStateWithLifecycle(initialValue = SubtitleStyleUtil.DEFAULT_SIZE)
                     ListPreferenceItem(
@@ -357,7 +354,7 @@ fun SettingContent(
                     )
                 }
                 item {
-                    val color by DataStoreUtil.getDataFlow(
+                    val color by SettingsRepository.getDataFlow(
                         ConfigKeyUtil.SUBTITLE_TEXT_COLOR, SubtitleStyleUtil.DEFAULT_COLOR
                     ).collectAsStateWithLifecycle(initialValue = SubtitleStyleUtil.DEFAULT_COLOR)
                     ListPreferenceItem(
@@ -371,7 +368,7 @@ fun SettingContent(
                     )
                 }
                 item {
-                    val font by DataStoreUtil.getDataFlow(
+                    val font by SettingsRepository.getDataFlow(
                         ConfigKeyUtil.SUBTITLE_FONT, SubtitleStyleUtil.DEFAULT_FONT
                     ).collectAsStateWithLifecycle(initialValue = SubtitleStyleUtil.DEFAULT_FONT)
                     ListPreferenceItem(
@@ -385,7 +382,7 @@ fun SettingContent(
                     )
                 }
                 item {
-                    val bold by DataStoreUtil.getDataFlow(ConfigKeyUtil.SUBTITLE_BOLD, false)
+                    val bold by SettingsRepository.getDataFlow(ConfigKeyUtil.SUBTITLE_BOLD, false)
                         .collectAsStateWithLifecycle(initialValue = false)
                     SwitchPreferenceItem(
                         title = "字幕粗体",
@@ -394,7 +391,7 @@ fun SettingContent(
                     )
                 }
                 item {
-                    val bg by DataStoreUtil.getDataFlow(ConfigKeyUtil.SUBTITLE_BACKGROUND, false)
+                    val bg by SettingsRepository.getDataFlow(ConfigKeyUtil.SUBTITLE_BACKGROUND, false)
                         .collectAsStateWithLifecycle(initialValue = false)
                     SwitchPreferenceItem(
                         title = "字幕半透明底色",
@@ -410,7 +407,53 @@ fun SettingContent(
                     )
                 }
 
-                // --- 4. 文件与缓存 ---
+
+                item { PreferenceCategoryHeader("大屏与扩展") }
+                item {
+                    EditTextPreferenceItem(
+                        title = "大屏宽度阈值",
+                        summary = "屏幕宽度达到 ${uiState.expandedScreenThreshold} dp 时触发大屏布局",
+                        value = uiState.expandedScreenThreshold,
+                        isNumber = true,
+                        enabled = uiState.expandedScreenEnabled,
+                        onValueSave = { onSaveConfig(ConfigKeyUtil.EXPANDED_SCREEN_THRESHOLD, it) }
+                    )
+                }
+                item {
+                    EditTextPreferenceItem(
+                        title = "网格最小宽度",
+                        summary = "网格布局单列最小宽度为 ${uiState.gridCellMinSize} dp",
+                        value = uiState.gridCellMinSize,
+                        isNumber = true,
+                        enabled = uiState.expandedScreenEnabled,
+                        onValueSave = { onSaveConfig(ConfigKeyUtil.GRID_CELL_MIN_SIZE, it) }
+                    )
+                }
+                item {
+                    EditTextPreferenceItem(
+                        title = "切换瀑布视图",
+                        summary = "当图片文件数量大于 ${uiState.autoImagePreviewCount} 个时，自动切换到瀑布流视图",
+                        value = uiState.autoImagePreviewCount,
+                        isNumber = true,
+                        onValueSave = { onSaveConfig(ConfigKeyUtil.AUTO_IMAGE_PREVIEW_COUNT, it) }
+                    )
+                }
+                item {
+                    SwitchPreferenceItem(
+                        title = "高清瀑布视图",
+                        summary = "开启后，瀑布流视图下将自动请求高清原图",
+                        checked = uiState.imageHdPreview,
+                        onCheckedChange = { onSaveConfig(ConfigKeyUtil.IMAGE_HD_PREVIEW, it) }
+                    )
+                }
+                item {
+                    SwitchPreferenceItem(
+                        title = "大屏扩展模式",
+                        summary = "在平板或大屏设备（屏幕宽度 ≥ ${uiState.expandedScreenThreshold}dp）上启用大屏展开布局",
+                        checked = uiState.expandedScreenEnabled,
+                        onCheckedChange = { onSaveConfig(ConfigKeyUtil.EXPANDED_SCREEN, it) }
+                    )
+                }
                 item { PreferenceCategoryHeader("文件与缓存") }
                 item {
                     EditTextPreferenceItem(
@@ -447,22 +490,6 @@ fun SettingContent(
                 }
                 item {
                     SwitchPreferenceItem(
-                        title = "开启请求磁盘缓存",
-                        summary = "将请求的文件列表缓存至本地存储，提升再次加载速度",
-                        checked = uiState.saveRequestCache,
-                        onCheckedChange = { onSaveConfig(ConfigKeyUtil.SAVE_REQUEST_CACHE, it) }
-                    )
-                }
-                item {
-                    SwitchPreferenceItem(
-                        title = "前后文件夹预加载",
-                        summary = "进入子目录时，自动预加载前后相邻文件夹的文件数据",
-                        checked = uiState.earlyLoading,
-                        onCheckedChange = { onSaveConfig(ConfigKeyUtil.EARLY_LOADING, it) }
-                    )
-                }
-                item {
-                    SwitchPreferenceItem(
                         title = "种子文件大小排序",
                         summary = "解析种子文件列表时按文件体积从大到小排列",
                         checked = uiState.torrentSort,
@@ -475,6 +502,22 @@ fun SettingContent(
                         summary = "下拉刷新时，强制清除当前目录下所有已缓存的文件数据",
                         checked = uiState.forceLoadCache,
                         onCheckedChange = { onSaveConfig(ConfigKeyUtil.FORCE_LOAD_CACHE, it) }
+                    )
+                }
+                item {
+                    SwitchPreferenceItem(
+                        title = "开启请求磁盘缓存",
+                        summary = "将请求的文件列表缓存至本地存储，提升再次加载速度",
+                        checked = uiState.saveRequestCache,
+                        onCheckedChange = { onSaveConfig(ConfigKeyUtil.SAVE_REQUEST_CACHE, it) }
+                    )
+                }
+                item {
+                    SwitchPreferenceItem(
+                        title = "前后文件夹预加载",
+                        summary = "进入子目录时，自动预加载前后相邻文件夹的文件数据",
+                        checked = uiState.earlyLoading,
+                        onCheckedChange = { onSaveConfig(ConfigKeyUtil.EARLY_LOADING, it) }
                     )
                 }
 
@@ -506,34 +549,6 @@ fun SettingContent(
                                 it
                             )
                         }
-                    )
-                }
-                item {
-                    EditTextPreferenceItem(
-                        title = "大屏宽度阈值",
-                        summary = "屏幕宽度达到 ${uiState.expandedScreenThreshold} dp 时触发大屏布局",
-                        value = uiState.expandedScreenThreshold,
-                        isNumber = true,
-                        enabled = uiState.expandedScreenEnabled,
-                        onValueSave = { onSaveConfig(ConfigKeyUtil.EXPANDED_SCREEN_THRESHOLD, it) }
-                    )
-                }
-                item {
-                    EditTextPreferenceItem(
-                        title = "网格最小宽度",
-                        summary = "网格布局单列最小宽度为 ${uiState.gridCellMinSize} dp",
-                        value = uiState.gridCellMinSize,
-                        isNumber = true,
-                        enabled = uiState.expandedScreenEnabled,
-                        onValueSave = { onSaveConfig(ConfigKeyUtil.GRID_CELL_MIN_SIZE, it) }
-                    )
-                }
-                item {
-                    SwitchPreferenceItem(
-                        title = "大屏扩展模式",
-                        summary = "在平板或大屏设备（屏幕宽度 ≥ ${uiState.expandedScreenThreshold}dp）上启用大屏展开布局",
-                        checked = uiState.expandedScreenEnabled,
-                        onCheckedChange = { onSaveConfig(ConfigKeyUtil.EXPANDED_SCREEN, it) }
                     )
                 }
                 item {

@@ -44,11 +44,11 @@
 
         <activity
             android:name=".activity.OfflineTaskActivity"
+            android:excludeFromRecents="true"
             android:exported="true"
             android:launchMode="singleInstance"
-            android:taskAffinity=""
-            android:excludeFromRecents="true"
             android:noHistory="true"
+            android:taskAffinity=""
             android:theme="@style/Theme.TransparentNoAnimation"
             tools:ignore="AppLinkUrlError">
             <intent-filter>
@@ -163,10 +163,7 @@
             android:name="androidx.work.impl.foreground.SystemForegroundService"
             android:foregroundServiceType="dataSync"
             tools:node="merge" />
-        <service
-            android:name=".service.Sha1Service"
-            android:exported="false" />
-        <service
+<service
             android:name=".service.AudioService"
             android:enabled="true"
             android:exported="false"

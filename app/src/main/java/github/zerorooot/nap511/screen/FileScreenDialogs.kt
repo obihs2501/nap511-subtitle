@@ -2,15 +2,13 @@ package github.zerorooot.nap511.screen
 
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.elvishew.xlog.XLog
 import com.google.gson.JsonParser
 import github.zerorooot.nap511.bean.FileDialogState
 import github.zerorooot.nap511.bean.OrderBean
 import github.zerorooot.nap511.bean.OrderEnum
 import github.zerorooot.nap511.bean.Route
-import github.zerorooot.nap511.dialog.Aria2Dialog
+import github.zerorooot.nap511.bean.SettingUiState
 import github.zerorooot.nap511.dialog.CreateFolderDialog
 import github.zerorooot.nap511.dialog.CreateSelectTorrentFileDialog
 import github.zerorooot.nap511.dialog.FileInfoDialog
@@ -22,10 +20,8 @@ import github.zerorooot.nap511.dialog.UnzipDialog
 import github.zerorooot.nap511.dialog.UnzipPassword
 import github.zerorooot.nap511.util.App
 import github.zerorooot.nap511.util.ConfigKeyUtil
-import github.zerorooot.nap511.util.DataStoreUtil
 import github.zerorooot.nap511.viewmodel.FileViewModel
 import github.zerorooot.nap511.viewmodel.addTorrentTask
-import github.zerorooot.nap511.viewmodel.closeAria2Dialog
 import github.zerorooot.nap511.viewmodel.closeCreateFolderDialog
 import github.zerorooot.nap511.viewmodel.closeCreateSelectTorrentFileDialog
 import github.zerorooot.nap511.viewmodel.closeFileInfoDialog
@@ -34,20 +30,24 @@ import github.zerorooot.nap511.viewmodel.closeRenameFileDialog
 import github.zerorooot.nap511.viewmodel.closeSearchDialog
 import github.zerorooot.nap511.viewmodel.closeUnzipPasswordDialog
 import github.zerorooot.nap511.viewmodel.createFolder
+import androidx.compose.runtime.rememberCoroutineScope
 import github.zerorooot.nap511.viewmodel.decryptZip
 import github.zerorooot.nap511.viewmodel.rename
+import kotlinx.coroutines.launch
 
 @ExperimentalMaterial3Api
 @Composable
 fun CreateDialogs(
     fileViewModel: FileViewModel,
+    settingUiState: SettingUiState,
     onNav: (Route) -> Unit
 ) {
+    val scope = rememberCoroutineScope()
     when (fileViewModel.activeDialog) {
         //重命名
         is FileDialogState.RenameFile -> {
             val name = fileViewModel.fileBeanList[fileViewModel.selectIndex].name
-            RenameFileDialog(name) {
+            RenameFileDialog(name, settingUiState.positionAfterAt) {
                 if (it != null && it != "") {
                     fileViewModel.rename(it)
                 }
@@ -102,22 +102,6 @@ fun CreateDialogs(
             }
         }
 
-        is FileDialogState.Aria2 -> {
-            val aria2Url by DataStoreUtil.getDataFlow(
-                ConfigKeyUtil.ARIA2_URL, ConfigKeyUtil.ARIA2_URL_DEFAULT_VALUE
-            ).collectAsStateWithLifecycle(initialValue = ConfigKeyUtil.ARIA2_URL_DEFAULT_VALUE)
-            Aria2Dialog(
-                context = aria2Url
-            ) {
-                fileViewModel.closeAria2Dialog()
-                if (it != "") {
-                    val jsonObject = JsonParser.parseString(it).asJsonObject
-                    val aria2Url = jsonObject.get(ConfigKeyUtil.ARIA2_URL).asString
-                    val aria2Token = jsonObject.get(ConfigKeyUtil.ARIA2_TOKEN).asString
-                    App.instance.checkAria2(aria2Url, aria2Token)
-                }
-            }
-        }
 
         is FileDialogState.Search -> {
             //搜索

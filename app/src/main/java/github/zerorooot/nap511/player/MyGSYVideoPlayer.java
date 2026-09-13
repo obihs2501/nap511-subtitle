@@ -3,14 +3,18 @@ package github.zerorooot.nap511.player;
 import android.content.Context;
 import android.content.res.Configuration;
 import android.graphics.Typeface;
+import android.graphics.Rect;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.os.BatteryManager;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.util.AttributeSet;
 import android.view.HapticFeedbackConstants;
 import android.view.View;
+import android.view.ViewConfiguration;
+import android.widget.ImageView;
 import android.widget.PopupMenu;
 import android.view.MotionEvent;
 import android.widget.TextView;
@@ -36,8 +40,29 @@ public class MyGSYVideoPlayer extends StandardGSYVideoPlayer {
     private long forwardRewindIncrementMs = 15000;
     private float normalPlaybackSpeed = 1f;
     private float longPressSpeed = 2f;
-    private boolean temporarySpeedActive;
+    private final HoldSpeedGesture holdGesture = new HoldSpeedGesture();
+    private boolean suppressGestureUntilUp;
+    private long pressDownTime;
+    private float pressX;
+    private float pressY;
+    private ImageView bottomPlayPause;
     private TextView holdSpeedHint;
+    private final Runnable activateHoldSpeed = () -> {
+        if (!holdGesture.activate(mCurrentState == CURRENT_STATE_PLAYING, !mLockCurScreen)) return;
+        suppressGestureUntilUp = true;
+        // Cancel child clicks and GSY seek/tap tracking before taking over the gesture.
+        MotionEvent cancel = MotionEvent.obtain(pressDownTime, SystemClock.uptimeMillis(),
+                MotionEvent.ACTION_CANCEL, pressX, pressY, 0);
+        super.dispatchTouchEvent(cancel);
+        gestureDetector.onTouchEvent(cancel);
+        cancel.recycle();
+        setSpeed(Math.max(normalPlaybackSpeed, longPressSpeed), true);
+        holdSpeedHint.setText(PlaybackUtil.speedLabel(Math.max(normalPlaybackSpeed, longPressSpeed))
+                + " 临时倍速 · 松手恢复");
+        holdSpeedHint.setVisibility(VISIBLE);
+        performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+        cancelDismissControlViewTimer();
+    };
     private Consumer<Float> onPlaybackSpeedChanged;
     private final Runnable dismissSeekHint = this::dismissProgressDialog;
     private TextView batteryTextView;
@@ -57,10 +82,12 @@ public class MyGSYVideoPlayer extends StandardGSYVideoPlayer {
 
     public MyGSYVideoPlayer(Context context) {
         super(context);
+        gestureDetector.setIsLongpressEnabled(false);
     }
 
     public MyGSYVideoPlayer(Context context, AttributeSet attrs) {
         super(context, attrs);
+        gestureDetector.setIsLongpressEnabled(false);
     }
 
     @Override
@@ -100,6 +127,12 @@ public class MyGSYVideoPlayer extends StandardGSYVideoPlayer {
         mMoreScale = findViewById(R.id.moreScale);
         switchSpeed = findViewById(R.id.switchSpeed);
         holdSpeedHint = findViewById(R.id.holdSpeedHint);
+        bottomPlayPause = findViewById(R.id.bottomPlayPause);
+        bottomPlayPause.setOnClickListener(v -> {
+            stopTemporarySpeed();
+            clickStartIcon();
+        });
+        updateBottomPlayPause();
         mNeedLockFull = true;
         mLockScreen.setContentDescription("锁定控制");
         mLockScreen.setOnClickListener(v -> {
@@ -108,6 +141,7 @@ public class MyGSYVideoPlayer extends StandardGSYVideoPlayer {
             lockTouchLogic();
             mLockScreen.setContentDescription(mLockCurScreen ? "解锁控制" : "锁定控制");
             resolveUIState(mCurrentState);
+            updateBottomPlayPause();
             mLockScreen.setVisibility(VISIBLE);
         });
         updateStatusVisibility();
@@ -160,41 +194,71 @@ public class MyGSYVideoPlayer extends StandardGSYVideoPlayer {
 
     @Override
     protected void touchLongPress(MotionEvent event) {
-        if (mLockCurScreen || mCurrentState != CURRENT_STATE_PLAYING
-                || mChangePosition || mChangeVolume || mBrightness || mTouchingProgressBar) return;
-        temporarySpeedActive = true;
-        float speed = Math.max(normalPlaybackSpeed, longPressSpeed);
-        setSpeed(speed, true);
-        holdSpeedHint.setText(PlaybackUtil.speedLabel(speed) + " 临时倍速 · 松手恢复");
-        holdSpeedHint.setVisibility(VISIBLE);
-        performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
-        cancelDismissControlViewTimer();
+        // All long presses are handled at dispatchTouchEvent, before video/overlay child views.
     }
 
     public void stopTemporarySpeed() {
-        if (!temporarySpeedActive) return;
-        temporarySpeedActive = false;
-        setSpeed(normalPlaybackSpeed, true);
+        if (holdGesture == null) return; // GSY can call state hooks during super construction.
+        removeCallbacks(activateHoldSpeed);
+        boolean wasActive = holdGesture.isActive();
+        holdGesture.reset();
+        if (wasActive) setSpeed(normalPlaybackSpeed, true);
         if (holdSpeedHint != null) holdSpeedHint.setVisibility(GONE);
+    }
+
+    private boolean touches(View child, MotionEvent event) {
+        if (child == null || !child.isShown()) return false;
+        Rect bounds = new Rect();
+        return child.getGlobalVisibleRect(bounds)
+                && bounds.contains((int) event.getRawX(), (int) event.getRawY());
+    }
+
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent event) {
+        int action = event.getActionMasked();
+        if (action == MotionEvent.ACTION_DOWN) {
+            stopTemporarySpeed();
+            suppressGestureUntilUp = false;
+            pressDownTime = event.getDownTime();
+            pressX = event.getX();
+            pressY = event.getY();
+            boolean eligible = mCurrentState == CURRENT_STATE_PLAYING && !mLockCurScreen
+                    && event.getPointerCount() == 1 && !touches(mTopContainer, event)
+                    && !touches(mBottomContainer, event) && !touches(mLockScreen, event)
+                    && !touches(mStartButton, event);
+            holdGesture.down(pressX, pressY, eligible);
+            if (eligible) postDelayed(activateHoldSpeed, ViewConfiguration.getLongPressTimeout());
+        } else if (action == MotionEvent.ACTION_MOVE) {
+            holdGesture.move(event.getX(), event.getY(), event.getPointerCount(),
+                    ViewConfiguration.get(getContext()).getScaledTouchSlop());
+            if (!holdGesture.isPending()) removeCallbacks(activateHoldSpeed);
+        } else if (action == MotionEvent.ACTION_POINTER_DOWN) {
+            stopTemporarySpeed();
+        }
+        if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+            boolean consumed = suppressGestureUntilUp;
+            stopTemporarySpeed();
+            suppressGestureUntilUp = false;
+            if (consumed) {
+                startDismissControlViewTimer();
+                return true;
+            }
+        }
+        if (suppressGestureUntilUp) return true;
+        return super.dispatchTouchEvent(event);
     }
 
     @Override
     public boolean onTouch(View view, MotionEvent event) {
-        if (mLockCurScreen) return true;
-        if (temporarySpeedActive) {
-            if (event.getActionMasked() == MotionEvent.ACTION_UP
-                    || event.getActionMasked() == MotionEvent.ACTION_CANCEL || event.getPointerCount() > 1) {
-                stopTemporarySpeed();
-                // 不把长按结束当成点击、拖动或双击，取消 GSY 的本次手势。
-                MotionEvent cancel = MotionEvent.obtain(event);
-                cancel.setAction(MotionEvent.ACTION_CANCEL);
-                super.onTouch(view, cancel);
-                cancel.recycle();
-                startDismissControlViewTimer();
-            }
-            return true;
-        }
-        return super.onTouch(view, event);
+        return mLockCurScreen || super.onTouch(view, event);
+    }
+
+    private void updateBottomPlayPause() {
+        if (bottomPlayPause == null) return;
+        boolean playing = isActivelyPlaying();
+        bottomPlayPause.setImageResource(playing ? R.drawable.ic_player_pause : R.drawable.ic_player_play);
+        bottomPlayPause.setContentDescription(playing ? "暂停" : "播放");
+        bottomPlayPause.setEnabled(!mLockCurScreen);
     }
 
     public boolean unlockControlsIfLocked() {
@@ -202,6 +266,7 @@ public class MyGSYVideoPlayer extends StandardGSYVideoPlayer {
         lockTouchLogic();
         mLockScreen.setContentDescription("锁定控制");
         resolveUIState(mCurrentState);
+        updateBottomPlayPause();
         return true;
     }
 
@@ -223,6 +288,7 @@ public class MyGSYVideoPlayer extends StandardGSYVideoPlayer {
         if (state == CURRENT_STATE_PAUSE || state == CURRENT_STATE_NORMAL
                 || state == CURRENT_STATE_AUTO_COMPLETE || state == CURRENT_STATE_ERROR) stopTemporarySpeed();
         super.setStateAndUi(state);
+        updateBottomPlayPause();
     }
 
     @Override
@@ -338,7 +404,7 @@ public class MyGSYVideoPlayer extends StandardGSYVideoPlayer {
 
     @Override
     public void touchDoubleUp(MotionEvent event) {
-        if (mLockCurScreen || temporarySpeedActive || !mHadPlay) return;
+        if (mLockCurScreen || holdGesture.isActive() || !mHadPlay) return;
         float x = event.getX();
         float width = mTextureViewContainer.getWidth();
         if (width <= 0) return;

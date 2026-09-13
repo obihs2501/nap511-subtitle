@@ -31,8 +31,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import github.zerorooot.nap511.bean.RecycleBean
 import github.zerorooot.nap511.dialog.RecyclePasswordDialog
 import github.zerorooot.nap511.screenitem.RecycleCellItem
+import github.zerorooot.nap511.repository.SettingsRepository
 import github.zerorooot.nap511.util.ConfigKeyUtil
-import github.zerorooot.nap511.util.DataStoreUtil
 import github.zerorooot.nap511.viewmodel.RecycleViewModel
 import kotlinx.coroutines.launch
 import my.nanihadesuka.compose.LazyColumnScrollbar
@@ -85,7 +85,7 @@ fun RecycleScreen(
         onPasswordEntered = { password ->
             if (!password.isNullOrEmpty()) {
                 scope.launch {
-                    DataStoreUtil.putDataSuspend(ConfigKeyUtil.PASSWORD, password)
+                    SettingsRepository.saveData(ConfigKeyUtil.PASSWORD, password)
                 }
 
                 if (deleteIndex == -1) {
@@ -121,17 +121,19 @@ fun RecycleContent(
     onPasswordEntered: (String?) -> Unit,
     onClick: () -> Unit
 ) {
-    val menuOnClick = { name: String, index: Int ->
-        when (name) {
-            "还原文件" -> onRevert(index)
-            "删除文件" -> onDelete(index)
+    val menuOnClick = { action: MenuItemAction, index: Int ->
+        when (action) {
+            MenuItemAction.RESTORE_FILE -> onRevert(index)
+            MenuItemAction.DELETE_FILE -> onDelete(index)
+            else -> {}
         }
     }
 
-    val appBarOnClick = { name: String ->
-        when (name) {
-            "清空所有文件" -> onDeleteAll()
-            "ModalNavigationDrawerMenu" -> onClick()
+    val appBarOnClick = { action: AppBarAction ->
+        when (action) {
+            TopBarAction.CLEAR_ALL_RECYCLE -> onDeleteAll()
+            TopBarAction.DRAWER_MENU -> onClick()
+            else -> {}
         }
     }
 

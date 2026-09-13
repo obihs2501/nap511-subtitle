@@ -141,22 +141,17 @@ fun HtmlWebViewScreen(
                             }
                         },
                         actions = {
-                            HtmlWebViewTopBarDropdownMenu(onClick = { itemValue, _ ->
-                                when (itemValue) {
-                                    "页面刷新" -> webViewInstance?.reload()
-                                    "页内查找" -> isSearchOpen = true
-                                    "外部打开" -> openInExternalBrowser(
-                                        context,
-                                        webViewInstance?.url,
-                                        htmlContent,
-                                        title
-                                    )
-                                    "分享链接" -> shareLink(
+                            HtmlWebViewTopBarDropdownMenu(onClick = { action, _ ->
+                                when (action) {
+                                    MenuItemAction.REFRESH_PAGE -> webViewInstance?.reload()
+                                    MenuItemAction.SEARCH_IN_PAGE -> isSearchOpen = true
+                                    MenuItemAction.SHARE_LINK -> shareLink(
                                         context,
                                         webViewInstance?.url ?: htmlContent,
                                         title
                                     )
-                                    "修改编码" -> showEncodingDialog = true
+                                    MenuItemAction.CHANGE_ENCODING -> showEncodingDialog = true
+                                    else -> {}
                                 }
                             })
                         }
@@ -244,34 +239,6 @@ fun HtmlWebViewScreen(
     }
 }
 
-private fun openInExternalBrowser(
-    context: Context,
-    url: String?,
-    htmlContent: String,
-    title: String
-) {
-    runCatching {
-        if (!url.isNullOrEmpty() && (url.startsWith("http://") || url.startsWith("https://"))) {
-            val intent = Intent(Intent.ACTION_VIEW, url.toUri())
-            context.startActivity(intent)
-        } else {
-            val cacheFile = File(context.cacheDir, "${title.hashCode()}.html")
-            cacheFile.writeText(htmlContent)
-            val uri = FileProvider.getUriForFile(
-                context,
-                "${context.packageName}.fileprovider",
-                cacheFile
-            )
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, "text/html")
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            context.startActivity(intent)
-        }
-    }.onFailure {
-        App.instance.toast("无法在外部打开")
-    }
-}
 
 private fun shareLink(context: Context, content: String, title: String) {
     runCatching {

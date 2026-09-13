@@ -24,7 +24,6 @@ import github.zerorooot.nap511.service.FileService
 import github.zerorooot.nap511.service.OfflineService
 import github.zerorooot.nap511.util.App
 import github.zerorooot.nap511.util.ConfigKeyUtil
-import github.zerorooot.nap511.util.DataStoreUtil
 import github.zerorooot.nap511.util.NetworkClient
 import github.zerorooot.nap511.util.Sha1Util
 import github.zerorooot.nap511.util.UserSessionManager
@@ -127,13 +126,13 @@ class FileRepository {
             }
             //把失败的离线链接保存起来
             val currentOfflineTaskList =
-                DataStoreUtil.getDataSuspend(ConfigKeyUtil.CURRENT_OFFLINE_TASK, "").split("\n")
+                SettingsRepository.getDataSuspend(ConfigKeyUtil.CURRENT_OFFLINE_TASK, "").split("\n")
                     .filter { i -> i != "" && i != " " }.toSet().toMutableList()
             currentOfflineTaskList.addAll(list)
             val stringJoiner = StringJoiner("\n")
             currentOfflineTaskList.toSet().forEach { stringJoiner.add(it) }
             //写入缓存
-            DataStoreUtil.putDataSuspend(
+            SettingsRepository.saveData(
                 ConfigKeyUtil.CURRENT_OFFLINE_TASK, stringJoiner.toString()
             )
             "任务添加失败，${addTask.errorMsg}"
@@ -452,25 +451,18 @@ class FileRepository {
                     ConfigKeyUtil.USER_AGENT
                 ).post(map).build()
 
-        val response = okHttpClient.newCall(request).execute()
-
-        val returnJson = JsonParser.parseString(response.body.string()).asJsonObject
-        XLog.v("FileRepository getDownloadUrl returnJson $returnJson")
-
-        val data = returnJson.get("data").asString
-        val m115Decode = sha1Util.m115_decode(data, m115Encode.key)
-        XLog.v("FileRepository getDownloadUrl m115Decode $m115Decode")
-
-        //{"fileId":{"file_name":"a","file_size":"0","pick_code":"pick_code","url":false}}
-        val downloadUrl = try {
-            JsonParser.parseString(m115Decode).asJsonObject.getAsJsonObject(fileId)
-                .getAsJsonObject("url").get("url").asString
-        } catch (e: Exception) {
-            XLog.e("FileRepository getDownloadUrl error ${JsonParser.parseString(m115Decode)}", e)
-            null
+        return okHttpClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) throw java.io.IOException("获取下载地址失败（HTTP ${response.code}）")
+            val result = JsonParser.parseString(response.body.string()).asJsonObject
+            val encrypted = result.get("data")?.takeIf { it.isJsonPrimitive }?.asString
+                ?: return@use null
+            val decoded = sha1Util.m115_decode(encrypted, m115Encode.key)
+            val file = JsonParser.parseString(decoded).asJsonObject.get(fileId)
+                ?.takeIf { it.isJsonObject }?.asJsonObject ?: return@use null
+            file.get("url")?.takeIf { it.isJsonObject }?.asJsonObject
+                ?.get("url")?.takeIf { it.isJsonPrimitive }?.asString
+            // Signed URLs contain temporary credentials; do not write them to application logs.
         }
-        XLog.i("FileRepository getDownloadUrl downloadUrl $downloadUrl")
-        return downloadUrl;
     }
 
     fun getDownloadInputStream(

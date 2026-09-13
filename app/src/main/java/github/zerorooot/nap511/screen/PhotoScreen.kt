@@ -51,9 +51,9 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
-import coil.request.CachePolicy
 import coil.request.ImageRequest
 import coil.size.Scale
+import com.elvishew.xlog.XLog
 import com.smarttoolfactory.zoom.enhancedZoom
 import com.smarttoolfactory.zoom.rememberEnhancedZoomState
 import github.zerorooot.nap511.bean.FileBean
@@ -113,7 +113,7 @@ fun MyPhotoScreen(
 @Composable
 private fun ImageBrowserScreen(
     photoList: List<FileBean>,
-    imageCache: Map<Int, ImageBean>,
+    imageCache: Map<String, ImageBean>,
     currentIndex: Int = 0,
     onLoadImage: (pageIndex: Int) -> Unit,
     onBack: () -> Unit = {}
@@ -143,7 +143,9 @@ private fun ImageBrowserScreen(
                 onLoadImage(page)
             }
 
-            val pageImage = imageCache[page] ?: ImageBean()
+
+            val currentFileBean = photoList.getOrNull(page)
+            val pageImage = currentFileBean?.pickCode?.let { imageCache[it] } ?: ImageBean()
 
             Box(
                 modifier = Modifier
@@ -178,9 +180,10 @@ private fun ImageBrowserScreen(
             exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
             modifier = Modifier.align(Alignment.TopCenter)
         ) {
+            val currentFileBean = photoList.getOrNull(rememberPagerState.currentPage)
             PhotoTopBar(
                 title = imageCache.getOrDefault(
-                    rememberPagerState.currentPage,
+                    currentFileBean?.pickCode,
                     ImageBean()
                 ).fileName.ifEmpty { "" },
                 onBack = onBack
@@ -267,6 +270,9 @@ private fun PhotoBottomBar(currentIndex: Int, totalCount: Int) {
 private fun FullScreenImage(image: ImageBean, onClick: () -> Unit) {
     var isLoading by remember { mutableStateOf(true) }
 
+    val imageData = image.url.ifEmpty { null }
+    val cacheKey = image.pickCode.ifEmpty { null }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -275,19 +281,25 @@ private fun FullScreenImage(image: ImageBean, onClick: () -> Unit) {
     ) {
         AsyncImage(
             model = ImageRequest.Builder(LocalContext.current)
-                .data(image.url)
-                .memoryCachePolicy(CachePolicy.ENABLED)
-                .diskCachePolicy(CachePolicy.ENABLED)
-                .networkCachePolicy(CachePolicy.ENABLED)
-                .memoryCacheKey(image.pickCode)
-                .diskCacheKey(image.pickCode)
+                .data(imageData)
+                .memoryCacheKey(cacheKey)
+                .diskCacheKey(cacheKey)
                 .crossfade(true)
                 .scale(Scale.FIT)
                 .build(),
             contentDescription = null,
             contentScale = ContentScale.Fit,
             onState = { state ->
-                isLoading = state is AsyncImagePainter.State.Loading
+                isLoading = state is AsyncImagePainter.State.Loading || imageData == null
+                if (state is AsyncImagePainter.State.Success) {
+                    XLog.d("MyPhotoScreen [图片加载成功] ImageBean=$image, source=${state.result.dataSource}")
+                }
+                if (state is AsyncImagePainter.State.Error && imageData != null) {
+                    XLog.e(
+                        "MyPhotoScreen [图片加载失败] ImageBean=$image",
+                        state.result.throwable
+                    )
+                }
             },
             modifier = Modifier
                 .fillMaxSize()

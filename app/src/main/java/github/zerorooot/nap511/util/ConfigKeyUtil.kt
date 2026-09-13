@@ -10,21 +10,6 @@ class ConfigKeyUtil {
             "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.61 Safari/537.36 115Browser/23.9.3.6"
 
         /**
-         * aria2秘钥
-         */
-        const val ARIA2_TOKEN = "aria2Token"
-
-        /**
-         * aria2 url地址
-         */
-        const val ARIA2_URL = "aria2Url"
-
-        /**
-         * aria2默认地址
-         */
-        const val ARIA2_URL_DEFAULT_VALUE = "http://0.0.0.0:6800/jsonrpc"
-
-        /**
          * cookie
          */
         const val COOKIE = "cookie"
@@ -38,16 +23,6 @@ class ConfigKeyUtil {
          * 回收站密码
          */
         const val PASSWORD = "password"
-
-        /**
-         * sha1 service中使用，原本有发送到aria2和获取文件sha1两种，但现sha1废了，仅有发送到aria2
-         */
-        const val COMMAND = "command"
-
-        /**
-         * 发送到aria2
-         */
-        const val SENT_TO_ARIA2 = "sentToAria2"
 
         /**
          * 在设置中，视频是否自动旋转
@@ -119,6 +94,16 @@ class ConfigKeyUtil {
         const val SAVE_REQUEST_CACHE = "SaveRequestCache"
 
         /**
+         * 图片预览高清模式
+         */
+        const val IMAGE_HD_PREVIEW = "imageHdPreview"
+
+        /**
+         * 当图片文件数量大于此阈值时，自动切换大图预览模式
+         */
+        const val AUTO_IMAGE_PREVIEW_COUNT = "autoImagePreviewCount"
+
+        /**
          * 支持打开xx kb以下的文件
          */
         const val MAX_TXT_SIZE = "MaxTxtSize"
@@ -172,6 +157,11 @@ class ConfigKeyUtil {
          * 主题色模式：跟随系统、亮色模式、暗色模式
          */
         const val THEME_MODE = "themeMode"
+
+        /**
+         * 隐藏后台电池优化提醒 Banner
+         */
+        const val HIDE_BATTERY_BANNER = "hideBatteryBanner"
 
 
         /**

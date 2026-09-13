@@ -73,20 +73,6 @@
             app:layout_constraintTop_toTopOf="parent">
 
 
-            <!-- 字幕切换按钮 (胶囊样式) -->
-            <TextView
-                android:id="@+id/subtitleButton"
-                android:layout_width="wrap_content"
-                android:layout_height="28dp"
-                android:layout_marginStart="10dp"
-                android:background="@drawable/bg_control_pill"
-                android:gravity="center"
-                android:minWidth="44dp"
-                android:paddingHorizontal="10dp"
-                android:text="字幕"
-                android:textColor="@android:color/white"
-                android:textSize="12sp" />
-
             <!-- 竖向半透明分割线 -->
             <View
                 android:id="@+id/statusDivider"
@@ -241,6 +227,14 @@
             android:layout_height="48dp"
             android:gravity="center_vertical"
             android:orientation="horizontal">
+            <ImageView
+                android:id="@+id/bottomPlayPause"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="播放"
+                android:padding="10dp"
+                android:src="@drawable/ic_player_play" />
             <HorizontalScrollView
                 android:layout_width="0dp"
                 android:layout_height="match_parent"

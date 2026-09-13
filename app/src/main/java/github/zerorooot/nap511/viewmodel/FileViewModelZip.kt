@@ -2,9 +2,12 @@ package github.zerorooot.nap511.viewmodel
 
 import androidx.lifecycle.asFlow
 import androidx.lifecycle.viewModelScope
+import androidx.work.Constraints
 import androidx.work.Data
 import androidx.work.ExistingWorkPolicy
+import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequest
+import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import com.elvishew.xlog.XLog
@@ -13,8 +16,6 @@ import com.google.gson.Gson
 import github.zerorooot.nap511.bean.FileBean
 import github.zerorooot.nap511.bean.ZipStatus
 import github.zerorooot.nap511.util.App
-import github.zerorooot.nap511.util.ConfigKeyUtil
-import github.zerorooot.nap511.util.DataStoreUtil
 import github.zerorooot.nap511.util.onFailureToastAndLog
 import github.zerorooot.nap511.worker.UnzipAllFileWorker
 import kotlinx.coroutines.Dispatchers
@@ -100,7 +101,7 @@ internal fun FileViewModel.unzipFile(fileBeansList: List<FileBean>, cid: String,
         }
 
         //获取离线失败移动目录cid
-        val errorCid = DataStoreUtil.getDataSuspend(ConfigKeyUtil.MOVE_FAIL_FILE, "")
+        val errorCid = settingUiState.moveFailFile
             .takeIf { it.isNotEmpty() }
             ?.let { data ->
                 fileBeanList.firstOrNull { it.isFolder && it.name == data }?.categoryId
@@ -111,11 +112,16 @@ internal fun FileViewModel.unzipFile(fileBeansList: List<FileBean>, cid: String,
                 errorCid
             }
 
-
-        val request: OneTimeWorkRequest =
-            OneTimeWorkRequest.Builder(UnzipAllFileWorker::class.java)
-                .addTag("UnzipAllFileWorkerOneTimeWorkRequest")
-                .setInputData(dataBuilder.build()).build()
+        val constraints = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.CONNECTED)
+            .build()
+        val request: OneTimeWorkRequest = OneTimeWorkRequest
+            .Builder(UnzipAllFileWorker::class.java)
+            .setConstraints(constraints)
+            .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+            .addTag("UnzipAllFileWorkerOneTimeWorkRequest")
+            .setInputData(dataBuilder.build())
+            .build()
 
         startUnzipWorker(request, cid, errorCid)
     }

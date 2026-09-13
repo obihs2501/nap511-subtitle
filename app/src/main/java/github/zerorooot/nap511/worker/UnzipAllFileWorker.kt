@@ -24,9 +24,9 @@ import github.zerorooot.nap511.bean.FileBean
 import github.zerorooot.nap511.bean.ZipBeanList
 import github.zerorooot.nap511.bean.ZipStatus
 import github.zerorooot.nap511.repository.FileRepository
+import github.zerorooot.nap511.repository.SettingsRepository
 import github.zerorooot.nap511.util.App
 import github.zerorooot.nap511.util.ConfigKeyUtil
-import github.zerorooot.nap511.util.DataStoreUtil
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -83,6 +83,11 @@ class UnzipAllFileWorker(
         notificationManager.createNotificationChannel(channel)
     }
 
+    override suspend fun getForegroundInfo(): ForegroundInfo {
+        createNotificationChannel()
+        return createForegroundInfo("解压中", "正在初始化解压任务...", 0, 1)
+    }
+
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         createNotificationChannel()
         // 1. 获取并校验文件列表
@@ -98,7 +103,13 @@ class UnzipAllFileWorker(
         // 2. 初始化进度和通知
         val size = fileBeanList.size
         val name = fileBeanList[0].name
-        setForegroundAsync(createForegroundInfo("解压中", "正在解压中", 0, size))
+
+        try {
+            setForeground(getForegroundInfo())
+        } catch (e: Exception) {
+            // Android 12+ 在后台无法启动前台服务，忽略异常继续在后台执行短任务
+            XLog.w("UnzipAllFileWorker setForeground 失败，将作为普通后台任务继续运行: ${e.message}")
+        }
 
         val sj = StringJoiner("\n")
         val unzipFailList = arrayListOf<FileBean>()
@@ -220,7 +231,7 @@ class UnzipAllFileWorker(
     }
 
     private suspend fun handleFailedFiles(unzipFailList: List<FileBean>): String? {
-        val data = DataStoreUtil.getDataSuspend(ConfigKeyUtil.MOVE_FAIL_FILE, "")
+        val data = SettingsRepository.getDataSuspend(ConfigKeyUtil.MOVE_FAIL_FILE, "")
         if (data.isEmpty()) {
             XLog.d("handleFailedFiles 不移动解压失败的文件")
         }
@@ -287,7 +298,17 @@ class UnzipAllFileWorker(
                             cancelPendingIntent
                         )
                         .build()
-                notificationManager.notify(NOTIFICATION_ID, build)
+
+                val foregroundInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    ForegroundInfo(
+                        NOTIFICATION_ID, build, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                    )
+                } else {
+                    ForegroundInfo(NOTIFICATION_ID, build)
+                }
+
+                setForegroundAsync(foregroundInfo)
+                notificationManager.notify(NOTIFICATION_ID, foregroundInfo.notification)
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -390,7 +411,7 @@ class UnzipAllFileWorker(
         titleString: String, detailedText: String, progress: Int, max: Int
     ): ForegroundInfo {
         val build =
-            createNotification(titleString, detailedText, "⚙\uFE0F初始化", progress, max).build()
+            createNotification(titleString, detailedText, "初始化", progress, max).build()
         // Android 14 前台服务类型适配
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             return ForegroundInfo(

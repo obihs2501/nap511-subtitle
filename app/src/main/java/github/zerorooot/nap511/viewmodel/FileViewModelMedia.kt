@@ -3,16 +3,17 @@ package github.zerorooot.nap511.viewmodel
 import android.content.Intent
 import android.content.res.Configuration
 import androidx.lifecycle.viewModelScope
+import coil.imageLoader
 import com.elvishew.xlog.XLog
 import com.google.gson.Gson
 import github.zerorooot.nap511.bean.FileBean
+import github.zerorooot.nap511.bean.ImageBean
 import github.zerorooot.nap511.bean.Route
 import github.zerorooot.nap511.bean.VideoInfoBean
-import github.zerorooot.nap511.service.Sha1Service
 import github.zerorooot.nap511.util.App
 import github.zerorooot.nap511.util.ConfigKeyUtil
 import github.zerorooot.nap511.util.PlaybackUtil
-import github.zerorooot.nap511.util.DataStoreUtil
+import github.zerorooot.nap511.util.getCoilCacheUrl
 import github.zerorooot.nap511.util.onFailureToastAndLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -24,27 +25,68 @@ import kotlin.math.roundToInt
  * FileViewModel 的扩展函数：媒体与文件查看相关
  */
 internal fun FileViewModel.getImage(fileBeanList: List<FileBean>, indexOf: Int) {
-    if (imageBeanCache.containsKey(currentCid) && imageBeanCache[currentCid]!!.containsKey(
-            indexOf
-        )
-    ) {
+    if (indexOf !in fileBeanList.indices) {
+        XLog.e("FileViewModel.getImage indexOf=$indexOf ,不在fileBeanList=$fileBeanList 范围中")
+        return
+    }
+    val fileBean = fileBeanList[indexOf]
+    getImage(fileBean)
+}
+
+/**
+ * FileViewModel 的扩展函数：媒体与文件查看相关
+ */
+internal fun FileViewModel.getImage(fileBean: FileBean) {
+    val pickCode = fileBean.pickCode
+    if (pickCode.isEmpty()) return
+
+    val cid = currentCid
+    if (imageBeanCache[cid]?.containsKey(pickCode) == true) {
         return
     }
 
+    // 优先匹配 Coil 缓存（按 MemoryCache -> DiskCache 顺序短路判断，在内存时无需磁盘 I/O）
+    val cachedUrl = getCoilCacheUrl(context.imageLoader, pickCode)
+    if (cachedUrl != null) {
+        val cachedImageBean = ImageBean(
+            url = cachedUrl,
+            fileName = fileBean.name,
+            pickCode = pickCode
+        )
+        val oldMap = imageBeanCache[cid] ?: hashMapOf()
+        val newMap = HashMap(oldMap)
+        newMap[pickCode] = cachedImageBean
+        imageBeanCache[cid] = newMap
+        return
+    }
+
+    val loadingKey = "$cid-$pickCode"
+    synchronized(imageLoadingSet) {
+        if (imageLoadingSet.contains(loadingKey)) return
+        imageLoadingSet.add(loadingKey)
+    }
+
     viewModelScope.launch {
-        runCatching {
-            val imageBean = fileRepository.image(
-                fileBeanList[indexOf].pickCode, System.currentTimeMillis() / 1000
-            ).imageBean
+        try {
+            runCatching {
+                val imageBean = fileRepository.image(
+                    pickCode, System.currentTimeMillis() / 1000
+                ).imageBean
 
-            val oldMap = imageBeanCache[currentCid] ?: hashMapOf()
-            val newMap = HashMap(oldMap)
-            newMap[indexOf] = imageBean
+                val oldMap = imageBeanCache[cid] ?: hashMapOf()
+                val newMap = HashMap(oldMap)
+                newMap[pickCode] = imageBean
 
-            imageBeanCache[currentCid] = newMap
-        }.onFailureToastAndLog()
+                imageBeanCache[cid] = newMap
+            }.onFailureToastAndLog()
+        } finally {
+            synchronized(imageLoadingSet) {
+                imageLoadingSet.remove(loadingKey)
+            }
+        }
     }
 }
+
 
 internal fun FileViewModel.updateVideoFileBean(
     cid: String,
@@ -82,7 +124,7 @@ internal fun FileViewModel.updateVideoFileBean(
             if (!videoHistory.state) {
                 App.instance.toast(videoHistory.error)
                 XLog.e("更新视频时间失败！ $videoHistory")
-            }else{
+            } else {
                 XLog.d("更新视频时间 $videoHistory")
             }
         }.onFailureToastAndLog()
@@ -96,13 +138,16 @@ internal fun FileViewModel.getVideoInfo(
     parentCid: String = ""
 ) {
     viewModelScope.launch {
-        val isAutoRotate = DataStoreUtil.getDataSuspend(ConfigKeyUtil.AUTO_ROTATE, false)
-        val videoLinkMode = DataStoreUtil.getDataSuspend(ConfigKeyUtil.VIDEO_LINK_MODE, false)
-
         runCatching {
-            val video = if (videoLinkMode) {
+            val video = if (settingUiState.videoLinkMode) {
                 fileRepository.video(pickCode)
-                    .copy(index = fileBeanIndex, isAutoRotate = isAutoRotate)
+                    .copy(
+                        index = fileBeanIndex,
+                        isAutoRotate = settingUiState.autoRotateEnabled,
+                        videoLinkMode = true,
+                        autoJumpRetry = settingUiState.autoJumpRetry,
+                        hideLoading = settingUiState.hideLoadingView
+                    )
             } else {
                 val (width, height) = if (context.resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT) {
                     1080 to 1920
@@ -116,6 +161,9 @@ internal fun FileViewModel.getVideoInfo(
                     fileName = fileName,
                     pickCode = pickCode,
                     parentId = parentCid,
+                    videoLinkMode = false,
+                    autoJumpRetry = settingUiState.autoJumpRetry,
+                    hideLoading = settingUiState.hideLoadingView,
                     videoUrl = "http://115.com/api/video/m3u8/${pickCode}.m3u8"
                 )
             }
@@ -174,14 +222,19 @@ internal fun FileViewModel.downloadWeb(fileBean: FileBean, onNav: (Route) -> Uni
     }
 }
 
-internal fun FileViewModel.startSendAria2Service(index: Int) {
-    val fileBean = fileBeanList[index]
-    if (fileBean.isFolder) {
-        App.instance.toast("暂时无法下载文件夹")
+internal fun FileViewModel.startLocalDownload(file: FileBean) {
+    if (file.isFolder || file.fileId.isBlank()) {
+        App.instance.toast("暂时无法下载文件夹，请进入文件夹选择文件")
         return
     }
-    val intent = Intent(context, Sha1Service::class.java)
-    intent.putExtra(ConfigKeyUtil.COMMAND, ConfigKeyUtil.SENT_TO_ARIA2)
-    intent.putExtra("list", Gson().toJson(fileBean))
-    context.startService(intent)
+    viewModelScope.launch {
+        try {
+            github.zerorooot.nap511.repository.DownloadRepository.instance.enqueue(file)
+            App.instance.toast("已加入本机下载，可在“本机下载”中查看进度")
+        } catch (error: Exception) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            XLog.e("创建本机下载任务失败: ${file.fileId}", error)
+            App.instance.toast(error.message ?: "创建下载失败，请检查网络或下载权限")
+        }
+    }
 }

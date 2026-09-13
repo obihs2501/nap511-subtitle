@@ -7,7 +7,6 @@ import android.content.ClipboardManager
 import android.content.Intent
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.grid.LazyGridState
-import androidx.compose.material3.FabPosition
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -18,7 +17,9 @@ import androidx.concurrent.futures.await
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.work.Constraints
 import androidx.work.Data
+import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequest
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
@@ -39,13 +40,14 @@ import github.zerorooot.nap511.bean.OrderEnum
 import github.zerorooot.nap511.bean.PathBean
 import github.zerorooot.nap511.bean.RemainingSpaceBean
 import github.zerorooot.nap511.bean.Route
+import github.zerorooot.nap511.bean.SettingUiState
 import github.zerorooot.nap511.bean.TorrentFileBean
 import github.zerorooot.nap511.bean.VideoInfoBean
 import github.zerorooot.nap511.bean.ZipBeanList
 import github.zerorooot.nap511.repository.FileRepository
+import github.zerorooot.nap511.repository.SettingsRepository
 import github.zerorooot.nap511.util.App
 import github.zerorooot.nap511.util.ConfigKeyUtil
-import github.zerorooot.nap511.util.DataStoreUtil
 import github.zerorooot.nap511.util.DialogEvent
 import github.zerorooot.nap511.util.DialogEventBus
 import github.zerorooot.nap511.util.FileCacheManager
@@ -68,17 +70,21 @@ import java.io.File
 
 data class FileUiState(
     val path: String = "",
-    val isRefreshing: Boolean = false,
-    val earlyLoading: Boolean = false,
-    val maxTxtSizeStr: String = "200",
-    val aria2UrlConfig: String = ConfigKeyUtil.ARIA2_URL_DEFAULT_VALUE,
-    val fabPosition: FabPosition = FabPosition.End
+    val isRefreshing: Boolean = false
 )
 
 
 @SuppressLint("MutableCollectionMutableState")
-class FileViewModel(application: Application) : AndroidViewModel(application) {
+class FileViewModel(
+    application: Application,
+) : AndroidViewModel(application) {
     internal val context = getApplication<Application>()
+
+    val settingUiStateFlow: StateFlow<SettingUiState> =
+        SettingsRepository.getInstance().settingUiStateFlow
+    val settingUiState: SettingUiState
+        get() = settingUiStateFlow.value
+
     var fileBeanList = mutableStateListOf<FileBean>()
     var unzipBeanList = mutableStateOf(ZipBeanList())
     var remainingSpace by mutableStateOf(RemainingSpaceBean())
@@ -110,40 +116,11 @@ class FileViewModel(application: Application) : AndroidViewModel(application) {
 
     val uiState: StateFlow<FileUiState> = combine(
         _currentPath,
-        _isRefreshing,
-        DataStoreUtil.getDataFlow(ConfigKeyUtil.EARLY_LOADING, false),
-        DataStoreUtil.getDataFlow(ConfigKeyUtil.MAX_TXT_SIZE, "200"),
-        DataStoreUtil.getDataFlow(
-            ConfigKeyUtil.ARIA2_URL,
-            ConfigKeyUtil.ARIA2_URL_DEFAULT_VALUE
-        ),
-        DataStoreUtil.getDataFlow(
-            ConfigKeyUtil.FLOATING_ACTION_BUTTON_POSITION,
-            "End"
-        )
-    ) { values: Array<Any?> ->
-        val path = values[0] as String
-        val refreshing = values[1] as Boolean
-        val earlyLoading = values[2] as Boolean
-        val maxTxtSizeStr = values[3] as String
-        val aria2UrlConfig = values[4] as String
-        val fabPosStr = values[5] as String
-
-        val fabPosition = when (fabPosStr) {
-            "Start" -> FabPosition.Start
-            "Center" -> FabPosition.Center
-            "End" -> FabPosition.End
-            "EndOverlay" -> FabPosition.EndOverlay
-            else -> FabPosition.End
-        }
-
+        _isRefreshing
+    ) { path, refreshing ->
         FileUiState(
             path = path,
-            isRefreshing = refreshing,
-            earlyLoading = earlyLoading,
-            maxTxtSizeStr = maxTxtSizeStr,
-            aria2UrlConfig = aria2UrlConfig,
-            fabPosition = fabPosition
+            isRefreshing = refreshing
         )
     }.stateIn(
         scope = viewModelScope,
@@ -170,7 +147,11 @@ class FileViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         viewModelScope.launch {
-            saveRequestCache = DataStoreUtil.getDataSuspend(ConfigKeyUtil.SAVE_REQUEST_CACHE, true)
+            settingUiStateFlow.collect { settings ->
+                saveRequestCache = settings.saveRequestCache
+            }
+        }
+        viewModelScope.launch {
             dialogEventBus.events.collect { event ->
                 when (event) {
                     is DialogEvent.RefreshFileList -> refresh(event.cid)
@@ -189,7 +170,8 @@ class FileViewModel(application: Application) : AndroidViewModel(application) {
     var photoFileBeanList = mutableListOf<FileBean>()
     var photoIndexOf by mutableIntStateOf(-1)
 
-    val imageBeanCache = mutableStateMapOf<String, HashMap<Int, ImageBean>>()
+    val imageBeanCache = mutableStateMapOf<String, HashMap<String, ImageBean>>()
+    internal val imageLoadingSet = hashSetOf<String>()
 
     //位置与点击记录相关
     val clickMap = mutableStateMapOf<String, Int>()
@@ -278,6 +260,14 @@ class FileViewModel(application: Application) : AndroidViewModel(application) {
         isInitialized = true
         _isRefreshing.value = true
         viewModelScope.launch(Dispatchers.IO) {
+            // 优先校验登录状态
+            if (UserSessionManager.cookie.isBlank()) {
+                _isRefreshing.value = false
+                // 未登录：静默发送跳转登录页事件
+                _navigationEvent.send(NavEvent.NavigateToScreen(Route.Login))
+                return@launch
+            }
+
             if (!saveRequestCache) {
                 // 不保存磁盘缓存时，仅清理硬盘旧文件，保留内存缓存
                 fileListCache.clearDiskOnly()
@@ -418,7 +408,6 @@ class FileViewModel(application: Application) : AndroidViewModel(application) {
                     else -> null
                 }
                 if (expiredTip != null) {
-                    App.instance.toast(expiredTip)
                     fileListCache.clearAll()
                     UserSessionManager.clearSession()
                     _navigationEvent.send(NavEvent.NavigateToScreen(Route.Login))
@@ -488,7 +477,7 @@ class FileViewModel(application: Application) : AndroidViewModel(application) {
         recoverFromLongPress()
         val refreshCurrent = (cid == currentCid)
         viewModelScope.launch {
-            if (DataStoreUtil.getDataSuspend(ConfigKeyUtil.FORCE_LOAD_CACHE, false) || forceCache) {
+            if (settingUiState.forceLoadCache || forceCache) {
                 removeFolderCacheRecursively(cid)
             }
             fileListCache.remove(cid)
@@ -564,7 +553,7 @@ class FileViewModel(application: Application) : AndroidViewModel(application) {
     }
 
 
-//    fun selectAll() {
+    //    fun selectAll() {
 //        val a = arrayListOf<FileBean>()
 //        fileBeanList.forEach { i ->
 //            i.isSelect = true
@@ -574,6 +563,9 @@ class FileViewModel(application: Application) : AndroidViewModel(application) {
 //        fileBeanList.addAll(a)
 //        appBarTitle = fileBeanList.size.toString()
 //    }
+    fun sortByVideoTime() {
+        fileBeanList.sortByDescending { it.playLong }
+    }
 
     fun selectReverse() {
         val updatedList = fileBeanList.map { it.copy(isSelect = !it.isSelect) }
@@ -636,12 +628,11 @@ class FileViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             // 获取并过滤本地缓存任务
-            val currentOfflineTask =
-                DataStoreUtil.getDataSuspend(ConfigKeyUtil.CURRENT_OFFLINE_TASK, "")
-                    .split("\n")
-                    .filter { i -> i.isNotBlank() } // 简化过滤逻辑
-                    .toSet()
-                    .toMutableList()
+            val currentOfflineTask = settingUiState.currentOfflineTask
+                .split("\n")
+                .filter { i -> i.isNotBlank() } // 简化过滤逻辑
+                .toSet()
+                .toMutableList()
 
             if (currentOfflineTask.isEmpty()) {
                 // 如果是主动添加模式且列表为空，弹 Toast 提示
@@ -661,9 +652,14 @@ class FileViewModel(application: Application) : AndroidViewModel(application) {
             val data = Data.Builder().putString("list", list)
                 .build()
 
+            val constraints = Constraints.Builder()
+                .setRequiredNetworkType(NetworkType.CONNECTED)
+                .build()
+
             val request = OneTimeWorkRequest.Builder(OfflineTaskWorker::class.java)
                 .addTag(ConfigKeyUtil.OFFLINE_TASK_WORKER)
                 .setInputData(data)
+                .setConstraints(constraints)
                 .build()
 
             workManager.enqueue(request)
