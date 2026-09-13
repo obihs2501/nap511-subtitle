@@ -225,6 +225,12 @@ class ConfigKeyUtil {
          */
         const val OFFLINE_TASK_WORKER = "OfflineTaskWorker"
 
+        /** 播放器设置；定时暂停仅本次播放有效，不持久化。 */
+        const val PLAYER_SPEED = "playerSpeed"
+        const val PLAYER_HOLD_SPEED = "playerHoldSpeed"
+        const val PLAYER_SEEK_STEP = "playerSeekStepSeconds"
+        const val PLAYER_AUTO_NEXT = "playerAutoNext"
+
         /** 字幕字号 (sp) */
         const val SUBTITLE_TEXT_SIZE = "subtitleTextSize"
 

@@ -14,14 +14,28 @@ android {
         applicationId = "github.zerorooot.nap511"
         minSdk = 26
         targetSdk = 37
-        versionCode = 11
-        versionName = "1.5"
+        versionCode = 12
+        versionName = "1.6.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // CI 从 GitHub Secrets 注入签名；私钥和密码不进入仓库或 Gradle 参数。
+    val releaseStore = System.getenv("NAP511_SIGNING_STORE_FILE")
+    signingConfigs {
+        if (!releaseStore.isNullOrBlank()) {
+            create("release") {
+                storeFile = file(releaseStore)
+                storePassword = System.getenv("NAP511_SIGNING_STORE_PASSWORD")
+                keyAlias = System.getenv("NAP511_SIGNING_KEY_ALIAS")
+                keyPassword = System.getenv("NAP511_SIGNING_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
+            signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(

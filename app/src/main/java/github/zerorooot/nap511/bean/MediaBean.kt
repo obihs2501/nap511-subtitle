@@ -28,6 +28,7 @@ data class VideoInfoBean(
     @SerializedName("origin_file_url") var originFileUrl: String = "",
     var index: Int = -1,
     var isAutoRotate: Boolean = false,
+    var resumePositionMs: Long = 0,
     @SerializedName("download_url")
     private val rawDownloadUrl: Any? = null
 ) {

@@ -16,10 +16,11 @@ object SubtitleConvertUtil {
         "layer", "start", "end", "style", "name",
         "marginl", "marginr", "marginv", "effect", "text"
     )
-    private val assEventsHeader = Regex("""(?im)^\s*\[events]\s*$""")
+    private val assEventsHeader = Regex("""(?im)^\s*\[events\]\s*$""")
     private val srtTiming = Regex("""(?m)^\s*\d+:\d{2}:\d{2}[,.]\d+\s+-->""")
     private val assTime = Regex("""(\d+):(\d{1,2}):(\d{1,2})(?:[.,](\d+))?""")
-    private val assOverride = Regex("""\{[^}]*}""")
+    // Android 的 ICU 要求字面量右花括号也转义；JVM 正则的宽松语法会掩盖此错误。
+    private val assOverride = Regex("""\{[^}]*\}""")
     private val drawingMode = Regex("""\\p(\d+)""")
 
     /**

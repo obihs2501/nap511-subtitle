@@ -15,8 +15,8 @@ object SubtitleStyleUtil {
     const val DEFAULT_COLOR = -1 // Color.WHITE
     const val DEFAULT_FONT = "default"
 
-    /** 字幕距底部距离 (dp)，略高于 56dp 的底部控制栏 */
-    private const val BOTTOM_MARGIN_DP = 60
+    /** 字幕距底部距离 (dp)，略高于 88dp 的底部控制栏 */
+    private const val BOTTOM_MARGIN_DP = 96
 
     /** 颜色预设：名称 -> ARGB */
     val COLOR_PRESETS: List<Pair<String, Int>> = listOf(

@@ -1,6 +1,7 @@
 package github.zerorooot.nap511.player;
 
 import android.content.Context;
+import android.content.res.Configuration;
 import android.graphics.Typeface;
 import android.content.Intent;
 import android.content.IntentFilter;
@@ -8,8 +9,9 @@ import android.os.BatteryManager;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.AttributeSet;
-import android.util.DisplayMetrics;
-import android.view.MenuItem;
+import android.view.HapticFeedbackConstants;
+import android.view.View;
+import android.widget.PopupMenu;
 import android.view.MotionEvent;
 import android.widget.TextView;
 
@@ -21,18 +23,23 @@ import com.shuyu.gsyvideoplayer.video.StandardGSYVideoPlayer;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
-import java.util.Objects;
+import java.util.function.Consumer;
 
 import github.zerorooot.nap511.R;
-import github.zerorooot.nap511.util.ConfigKeyUtil;
-import github.zerorooot.nap511.util.DataStoreUtil;
+import github.zerorooot.nap511.util.PlaybackUtil;
 
 public class MyGSYVideoPlayer extends StandardGSYVideoPlayer {
     private TextView mMoreScale;
     private TextView switchSpeed;
     private int mType = 0;
 
-    long forwardRewindIncrementMs = 15000;
+    private long forwardRewindIncrementMs = 15000;
+    private float normalPlaybackSpeed = 1f;
+    private float longPressSpeed = 2f;
+    private boolean temporarySpeedActive;
+    private TextView holdSpeedHint;
+    private Consumer<Float> onPlaybackSpeedChanged;
+    private final Runnable dismissSeekHint = this::dismissProgressDialog;
     private TextView batteryTextView;
     private TextView timeTextView;
     public static String TAG = "MyGSYVideoPlayer";
@@ -92,6 +99,18 @@ public class MyGSYVideoPlayer extends StandardGSYVideoPlayer {
 
         mMoreScale = findViewById(R.id.moreScale);
         switchSpeed = findViewById(R.id.switchSpeed);
+        holdSpeedHint = findViewById(R.id.holdSpeedHint);
+        mNeedLockFull = true;
+        mLockScreen.setContentDescription("锁定控制");
+        mLockScreen.setOnClickListener(v -> {
+            if (!mHadPlay) return;
+            stopTemporarySpeed();
+            lockTouchLogic();
+            mLockScreen.setContentDescription(mLockCurScreen ? "解锁控制" : "锁定控制");
+            resolveUIState(mCurrentState);
+            mLockScreen.setVisibility(VISIBLE);
+        });
+        updateStatusVisibility();
 
         // 切换画面比例
         mMoreScale.setOnClickListener(v -> {
@@ -100,36 +119,124 @@ public class MyGSYVideoPlayer extends StandardGSYVideoPlayer {
             resolveTypeUI();
         });
 
-        // 切换倍速
         switchSpeed.setOnClickListener(v -> {
-            v.setOnCreateContextMenuListener((menu, v1, menuInfo) -> {
-                MenuItem speed5 = menu.add("× 0.5");
-                speed5.setOnMenuItemClickListener(e -> {
-                    getCurrentPlayer().setSpeed(0.5f, true);
-                    switchSpeed.setText("0.5X");
-                    return true;
-                });
-                MenuItem speed1 = menu.add("× 1.0");
-                speed1.setOnMenuItemClickListener(e -> {
-                    getCurrentPlayer().setSpeed(1f, true);
-                    switchSpeed.setText("倍速");
-                    return true;
-                });
-                MenuItem speed15 = menu.add("× 1.5");
-                speed15.setOnMenuItemClickListener(e -> {
-                    getCurrentPlayer().setSpeed(1.5f, true);
-                    switchSpeed.setText("1.5X");
-                    return true;
-                });
-                MenuItem speed2 = menu.add("× 2.0");
-                speed2.setOnMenuItemClickListener(e -> {
-                    getCurrentPlayer().setSpeed(2f, true);
-                    switchSpeed.setText("2.0X");
-                    return true;
-                });
-            });
-            v.showContextMenu(v.getX(), v.getY());
+            PopupMenu popup = new PopupMenu(getContext(), v);
+            for (float speed : PlaybackUtil.INSTANCE.getSPEEDS()) {
+                popup.getMenu().add(PlaybackUtil.speedLabel(speed))
+                        .setCheckable(true).setChecked(speed == normalPlaybackSpeed)
+                        .setOnMenuItemClickListener(item -> {
+                            setPlaybackSpeed(speed);
+                            if (onPlaybackSpeedChanged != null) onPlaybackSpeedChanged.accept(speed);
+                            return true;
+                        });
+            }
+            popup.show();
         });
+    }
+
+    public void setOnPlaybackSpeedChanged(Consumer<Float> listener) {
+        onPlaybackSpeedChanged = listener;
+    }
+
+    public void setPlaybackSpeed(float speed) {
+        normalPlaybackSpeed = Float.isFinite(speed) ? Math.max(0.5f, Math.min(3f, speed)) : 1f;
+        stopTemporarySpeed();
+        setSpeed(normalPlaybackSpeed, true);
+        if (switchSpeed != null) switchSpeed.setText(PlaybackUtil.speedLabel(normalPlaybackSpeed));
+    }
+
+    public void setLongPressSpeed(float speed) {
+        longPressSpeed = speed == 3f ? 3f : 2f;
+    }
+
+    public void setSeekStepSeconds(long seconds) {
+        forwardRewindIncrementMs = Math.max(1, Math.min(60, seconds)) * 1000;
+    }
+
+    public boolean isActivelyPlaying() {
+        return mCurrentState == CURRENT_STATE_PLAYING || mCurrentState == CURRENT_STATE_PREPAREING
+                || mCurrentState == CURRENT_STATE_PLAYING_BUFFERING_START;
+    }
+
+    @Override
+    protected void touchLongPress(MotionEvent event) {
+        if (mLockCurScreen || mCurrentState != CURRENT_STATE_PLAYING
+                || mChangePosition || mChangeVolume || mBrightness || mTouchingProgressBar) return;
+        temporarySpeedActive = true;
+        float speed = Math.max(normalPlaybackSpeed, longPressSpeed);
+        setSpeed(speed, true);
+        holdSpeedHint.setText(PlaybackUtil.speedLabel(speed) + " 临时倍速 · 松手恢复");
+        holdSpeedHint.setVisibility(VISIBLE);
+        performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+        cancelDismissControlViewTimer();
+    }
+
+    public void stopTemporarySpeed() {
+        if (!temporarySpeedActive) return;
+        temporarySpeedActive = false;
+        setSpeed(normalPlaybackSpeed, true);
+        if (holdSpeedHint != null) holdSpeedHint.setVisibility(GONE);
+    }
+
+    @Override
+    public boolean onTouch(View view, MotionEvent event) {
+        if (mLockCurScreen) return true;
+        if (temporarySpeedActive) {
+            if (event.getActionMasked() == MotionEvent.ACTION_UP
+                    || event.getActionMasked() == MotionEvent.ACTION_CANCEL || event.getPointerCount() > 1) {
+                stopTemporarySpeed();
+                // 不把长按结束当成点击、拖动或双击，取消 GSY 的本次手势。
+                MotionEvent cancel = MotionEvent.obtain(event);
+                cancel.setAction(MotionEvent.ACTION_CANCEL);
+                super.onTouch(view, cancel);
+                cancel.recycle();
+                startDismissControlViewTimer();
+            }
+            return true;
+        }
+        return super.onTouch(view, event);
+    }
+
+    public boolean unlockControlsIfLocked() {
+        if (!mLockCurScreen) return false;
+        lockTouchLogic();
+        mLockScreen.setContentDescription("锁定控制");
+        resolveUIState(mCurrentState);
+        return true;
+    }
+
+    @Override
+    protected void setViewShowState(View view, int visibility) {
+        // 本应用通过 Activity 横竖屏切换而非 GSY 的全屏克隆，锁屏在两种方向均可用。
+        if (view != null && view == mLockScreen) {
+            super.setViewShowState(view, mHadPlay ? VISIBLE : GONE);
+            return;
+        }
+        if (mLockCurScreen && (view == mTopContainer || view == mBottomContainer || view == mStartButton)) {
+            visibility = GONE;
+        }
+        super.setViewShowState(view, visibility);
+    }
+
+    @Override
+    protected void setStateAndUi(int state) {
+        if (state == CURRENT_STATE_PAUSE || state == CURRENT_STATE_NORMAL
+                || state == CURRENT_STATE_AUTO_COMPLETE || state == CURRENT_STATE_ERROR) stopTemporarySpeed();
+        super.setStateAndUi(state);
+    }
+
+    @Override
+    protected void onConfigurationChanged(Configuration configuration) {
+        super.onConfigurationChanged(configuration);
+        updateStatusVisibility();
+    }
+
+    private void updateStatusVisibility() {
+        boolean landscape = getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE;
+        View status = findViewById(R.id.layout_status_info);
+        View divider = findViewById(R.id.statusDivider);
+        if (status != null) status.setVisibility(landscape ? VISIBLE : GONE);
+        if (divider != null) divider.setVisibility(landscape ? VISIBLE : GONE);
     }
 
     /**
@@ -146,6 +253,8 @@ public class MyGSYVideoPlayer extends StandardGSYVideoPlayer {
      */
     @Override
     protected void onDetachedFromWindow() {
+        stopTemporarySpeed();
+        removeCallbacks(dismissSeekHint);
         super.onDetachedFromWindow();
         stopClockTimer();
     }
@@ -210,19 +319,15 @@ public class MyGSYVideoPlayer extends StandardGSYVideoPlayer {
     }
 
     public void forwardOrRewind(long time) {
-        long totalTimeDuration = getDuration();
-        mSeekTimePosition = (int) (getGSYVideoManager().getCurrentPosition() + time);
-        if (mSeekTimePosition > totalTimeDuration) {
-            mSeekTimePosition = totalTimeDuration;
-        }
-        String seekTime = CommonUtil.stringForTime(mSeekTimePosition);
-        String totalTime = CommonUtil.stringForTime(totalTimeDuration);
+        if (mLockCurScreen || !mHadPlay || getDuration() <= 0) return;
+        long duration = getDuration();
+        mSeekTimePosition = PlaybackUtil.seekPosition(getCurrentPositionWhenPlaying(), time, duration);
         getGSYVideoManager().seekTo(mSeekTimePosition);
-
-        new Handler(Objects.requireNonNull(Looper.myLooper())).postDelayed(() -> {
-            showProgressDialog(time, seekTime, mSeekTimePosition, totalTime, totalTimeDuration);
-        }, 100);
-        new Handler(Objects.requireNonNull(Looper.myLooper())).postDelayed(this::dismissProgressDialog, 600);
+        refreshSubtitleAfterSeek(mSeekTimePosition);
+        showProgressDialog(time, CommonUtil.stringForTime(mSeekTimePosition), mSeekTimePosition,
+                CommonUtil.stringForTime(duration), duration);
+        removeCallbacks(dismissSeekHint);
+        postDelayed(dismissSeekHint, 700);
     }
 
     public void playNext(String url, String title) {
@@ -233,17 +338,16 @@ public class MyGSYVideoPlayer extends StandardGSYVideoPlayer {
 
     @Override
     public void touchDoubleUp(MotionEvent event) {
+        if (mLockCurScreen || temporarySpeedActive || !mHadPlay) return;
         float x = event.getX();
-        DisplayMetrics displayMetrics = mContext.getResources().getDisplayMetrics();
-        int screenWidth = displayMetrics.widthPixels;
-
-        if (x <= screenWidth * 0.3) {
-            forwardOrRewind(forwardRewindIncrementMs * (-1));
-        } else if (x > screenWidth * 0.3 && x < screenWidth * 0.6) {
-            if (!mHadPlay) return;
-            clickStartIcon();
-        } else if (x >= screenWidth * 0.6) {
+        float width = mTextureViewContainer.getWidth();
+        if (width <= 0) return;
+        if (x < width / 3f) {
+            forwardOrRewind(-forwardRewindIncrementMs);
+        } else if (x > width * 2f / 3f) {
             forwardOrRewind(forwardRewindIncrementMs);
+        } else {
+            clickStartIcon();
         }
     }
 }

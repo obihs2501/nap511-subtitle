@@ -11,6 +11,7 @@ import github.zerorooot.nap511.bean.VideoInfoBean
 import github.zerorooot.nap511.service.Sha1Service
 import github.zerorooot.nap511.util.App
 import github.zerorooot.nap511.util.ConfigKeyUtil
+import github.zerorooot.nap511.util.PlaybackUtil
 import github.zerorooot.nap511.util.DataStoreUtil
 import github.zerorooot.nap511.util.onFailureToastAndLog
 import kotlinx.coroutines.Dispatchers
@@ -52,27 +53,22 @@ internal fun FileViewModel.updateVideoFileBean(
     pickCode: String
 ) {
     viewModelScope.launch {
-        val fileBean = fileBeanList[index]
-
-        if (fileBean.isVideo != 1) return@launch
-
-        val playTime = if (fileBean.playLong == 0.0) {
-            100
-        } else {
-            ((duration.toFloat() / fileBean.playLong) * 100).roundToInt()
-        }
-
-        val createTimeString =
-            SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(
-                fileBean.createTime.toLong() * 1000
+        // 换集后返回的不是最初点击的行；按 pickCode 定位，避免改错行或索引越界。
+        val actualIndex = if (fileBeanList.getOrNull(index)?.pickCode == pickCode) index
+            else fileBeanList.indexOfFirst { it.pickCode == pickCode }
+        val fileBean = fileBeanList.getOrNull(actualIndex)
+        if (fileBean != null && fileBean.isVideo == 1) {
+            val playTime = if (fileBean.playLong <= 0.0) 0
+                else ((duration.toFloat() / fileBean.playLong) * 100).roundToInt().coerceIn(0, 100)
+            val createTimeString = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(
+                (fileBean.createTime.toLongOrNull() ?: 0L) * 1000
             )
-        val newTimeString = "▶️ $playTime% $createTimeString"
-        val updatedBean = fileBean.copy(createTimeString = newTimeString)
-        fileBeanList[index] = updatedBean
-
-        if (!isSearchState) {
-            fileListCache[cid]?.fileBeanList = ArrayList(fileBeanList.toList())
+            fileBeanList[actualIndex] = fileBean.copy(
+                createTimeString = "▶️ $playTime% $createTimeString", currentPlayTime = duration.coerceAtLeast(0)
+            )
+            if (!isSearchState) fileListCache[cid]?.fileBeanList = ArrayList(fileBeanList.toList())
         }
+        if (pickCode.isBlank()) return@launch
 
         val map = mapOf(
             "op" to "update",
@@ -121,6 +117,12 @@ internal fun FileViewModel.getVideoInfo(
                     pickCode = pickCode,
                     parentId = parentCid,
                     videoUrl = "http://115.com/api/video/m3u8/${pickCode}.m3u8"
+                )
+            }
+            video.parentId = video.parentId.ifEmpty { parentCid }
+            fileBeanList.getOrNull(fileBeanIndex)?.takeIf { it.pickCode == pickCode }?.let { file ->
+                video.resumePositionMs = PlaybackUtil.resumePosition(
+                    file.currentPlayTime * 1000L, (file.playLong * 1000).toLong()
                 )
             }
             XLog.d("FileViewModel getVideoInfo $video")

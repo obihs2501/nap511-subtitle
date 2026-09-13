@@ -7,6 +7,7 @@ import android.net.Uri
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.View
 import android.widget.Toast
 import androidx.activity.addCallback
@@ -15,6 +16,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.annotation.OptIn
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.Lifecycle
 import androidx.media3.common.PlaybackException.CUSTOM_ERROR_CODE_BASE
 import androidx.media3.common.PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED
 import androidx.media3.common.PlaybackException.ERROR_CODE_AUDIO_TRACK_WRITE_FAILED
@@ -72,6 +74,7 @@ import com.shuyu.gsyvideoplayer.GSYVideoManager
 import com.shuyu.gsyvideoplayer.listener.GSYSampleCallBack
 import com.shuyu.gsyvideoplayer.player.PlayerFactory
 import com.shuyu.gsyvideoplayer.subtitle.GSYSubtitleSource
+import com.shuyu.gsyvideoplayer.video.base.GSYVideoView
 import github.zerorooot.nap511.R
 import github.zerorooot.nap511.bean.FileBean
 import github.zerorooot.nap511.bean.SubtitleBrowseState
@@ -79,6 +82,8 @@ import github.zerorooot.nap511.bean.SubtitleStyleState
 import github.zerorooot.nap511.bean.VideoInfoBean
 import github.zerorooot.nap511.bean.XunleiSubtitleBean
 import github.zerorooot.nap511.dialog.SubtitlePickerDialog
+import github.zerorooot.nap511.dialog.EpisodePickerDialog
+import github.zerorooot.nap511.dialog.PlaybackSettingsDialog
 import github.zerorooot.nap511.player.MyGSYVideoPlayer
 import github.zerorooot.nap511.repository.FileRepository
 import github.zerorooot.nap511.repository.SubtitleRepository
@@ -87,9 +92,13 @@ import github.zerorooot.nap511.util.App
 import github.zerorooot.nap511.util.ConfigKeyUtil
 import github.zerorooot.nap511.util.DataStoreUtil
 import github.zerorooot.nap511.util.SubtitleConvertUtil
+import github.zerorooot.nap511.util.PlaybackUtil
 import github.zerorooot.nap511.util.SubtitleStyleUtil
 import github.zerorooot.nap511.util.UserSessionManager
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -242,11 +251,7 @@ class VideoActivity : AppCompatActivity() {
     @Volatile
     private var isReloadingVideo = false
     private lateinit var videoPlayer: MyGSYVideoPlayer
-    private val videoInfo: VideoInfoBean by lazy {
-        Gson().fromJson(
-            intent.getStringExtra("bean")!!, VideoInfoBean::class.java
-        )
-    }
+    private var videoInfo by mutableStateOf(VideoInfoBean())
     private val isAutoRotate by lazy {
         videoInfo.isAutoRotate
     }
@@ -254,6 +259,28 @@ class VideoActivity : AppCompatActivity() {
 
     private var videoLinkMode = false
     private var autoJumpRetry = true
+    private var showEpisodeDialog by mutableStateOf(false)
+    private var showPlaybackSettings by mutableStateOf(false)
+    private var episodeFiles by mutableStateOf<List<FileBean>>(emptyList())
+    private var episodeLoading by mutableStateOf(false)
+    private var episodeError by mutableStateOf("")
+    private var switchingEpisodeName by mutableStateOf("")
+    private var episodeDirectory = ""
+    private var episodeLoadJob: Job? = null
+    private var episodeSwitchJob: Job? = null
+    private var playbackSpeed by mutableStateOf(1f)
+    private var holdSpeed by mutableStateOf(2f)
+    private var seekStepSeconds by mutableStateOf(15L)
+    private var autoPlayNext by mutableStateOf(false)
+    private var sleepTimerSeconds by mutableStateOf(0L)
+    private var stopAfterEpisode by mutableStateOf(false)
+    private var sleepTimerJob: Job? = null
+    private var resumeOnForeground = false
+    private var videoDurationMs = 0L
+    private var subtitleSession = 0
+    private var subtitleSelectionId = 0
+    private var sleepDeadlineMs = 0L
+    private var pausedBySleepTimer = false
 
     // ------------------- 字幕相关 -------------------
     private val subtitleRepository by lazy { SubtitleRepository.getInstance() }
@@ -285,11 +312,16 @@ class VideoActivity : AppCompatActivity() {
         }
 
     /** 视频所在目录的 cid，用于查找同目录字幕（getVideoInfo 已把真实 pid 写入 VideoInfoBean.parentId） */
-    private val videoParentCid: String by lazy { videoInfo.parentId }
+    private val videoParentCid: String get() = videoInfo.parentId
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        videoInfo = runCatching {
+            Gson().fromJson(intent.getStringExtra("bean"), VideoInfoBean::class.java)
+        }.getOrNull() ?: run { finish(); return }
+        setContentView(R.layout.activity_video)
+        videoPlayer = findViewById(R.id.pre_video_player)
         lifecycleScope.launch {
             videoLinkMode = DataStoreUtil.getDataSuspend(ConfigKeyUtil.VIDEO_LINK_MODE, false)
             autoJumpRetry = DataStoreUtil.getDataSuspend(ConfigKeyUtil.AUTO_JUMP_RETRY, true)
@@ -298,8 +330,17 @@ class VideoActivity : AppCompatActivity() {
             // 读取并应用字幕样式
             subtitleStyle = SubtitleStyleUtil.load()
             applySubtitleStyle(subtitleStyle)
+            playbackSpeed = DataStoreUtil.getDataSuspend(ConfigKeyUtil.PLAYER_SPEED, 1f)
+                .takeIf { it in PlaybackUtil.SPEEDS } ?: 1f
+            holdSpeed = DataStoreUtil.getDataSuspend(ConfigKeyUtil.PLAYER_HOLD_SPEED, 2f)
+                .takeIf { it in PlaybackUtil.HOLD_SPEEDS } ?: 2f
+            seekStepSeconds = DataStoreUtil.getDataSuspend(ConfigKeyUtil.PLAYER_SEEK_STEP, 15L)
+                .takeIf { it in PlaybackUtil.SEEK_STEPS } ?: 15L
+            autoPlayNext = DataStoreUtil.getDataSuspend(ConfigKeyUtil.PLAYER_AUTO_NEXT, false)
+            videoPlayer.setPlaybackSpeed(playbackSpeed)
+            videoPlayer.setLongPressSpeed(holdSpeed)
+            videoPlayer.setSeekStepSeconds(seekStepSeconds)
         }
-        setContentView(R.layout.activity_video)
         val headerMap = hashMapOf(
             "cookie" to UserSessionManager.cookie,
             "User-Agent" to ConfigKeyUtil.USER_AGENT
@@ -309,13 +350,21 @@ class VideoActivity : AppCompatActivity() {
         }
         val title = videoInfo.fileName
         subtitleSearchKeyword = title
-        videoPlayer = findViewById(R.id.pre_video_player)
 
         initGSYExoPlayerWithOkHttp(this.applicationContext)
         PlayerFactory.setPlayManager(Exo2PlayerManager::class.java)
 
         videoPlayer.apply {
             setUp(address, false, null, headerMap, title)
+            setSeekOnStart(videoInfo.resumePositionMs)
+            setOnPlaybackSpeedChanged { value -> changePlaybackSpeed(value) }
+            findViewById<View>(R.id.episodeButton).setOnClickListener {
+                showEpisodeDialog = true
+                loadEpisodes()
+            }
+            findViewById<View>(R.id.previousEpisodeButton).setOnClickListener { playAdjacentEpisode(-1) }
+            findViewById<View>(R.id.nextEpisodeButton).setOnClickListener { playAdjacentEpisode(1) }
+            findViewById<View>(R.id.playerSettingsButton).setOnClickListener { showPlaybackSettings = true }
             //增加title
             titleTextView.visibility = View.VISIBLE
             titleTextView.isSelected = true
@@ -367,6 +416,52 @@ class VideoActivity : AppCompatActivity() {
                 else -> androidx.compose.foundation.isSystemInDarkTheme()
             }
             Nap511Theme(darkTheme = darkTheme, dynamicColor = dynamicColor) {
+                if (showEpisodeDialog) {
+                    EpisodePickerDialog(
+                        episodes = episodeFiles, currentPickCode = videoInfo.pickCode,
+                        loading = episodeLoading, switchingName = switchingEpisodeName,
+                        error = episodeError, autoNext = autoPlayNext,
+                        onSelect = { switchEpisode(it) }, onAutoNextChange = { changeAutoNext(it) },
+                        onRetry = { loadEpisodes(force = true) }, onDismiss = { showEpisodeDialog = false }
+                    )
+                }
+                if (showPlaybackSettings) {
+                    PlaybackSettingsDialog(
+                        speed = playbackSpeed, holdSpeed = holdSpeed, seekStep = seekStepSeconds,
+                        autoNext = autoPlayNext, timerSeconds = sleepTimerSeconds,
+                        stopAfterEpisode = stopAfterEpisode,
+                        onSpeed = { changePlaybackSpeed(it) },
+                        onHoldSpeed = {
+                            holdSpeed = it
+                            videoPlayer.setLongPressSpeed(it)
+                            lifecycleScope.launch { DataStoreUtil.putDataSuspend(ConfigKeyUtil.PLAYER_HOLD_SPEED, it) }
+                        },
+                        onSeekStep = {
+                            seekStepSeconds = it
+                            videoPlayer.setSeekStepSeconds(it)
+                            lifecycleScope.launch { DataStoreUtil.putDataSuspend(ConfigKeyUtil.PLAYER_SEEK_STEP, it) }
+                        },
+                        onAutoNext = { changeAutoNext(it) }, onTimer = { setSleepTimer(it) },
+                        onStopAfterEpisode = { enabled ->
+                            if (enabled) setSleepTimer(0)
+                            stopAfterEpisode = enabled
+                        },
+                        onRestart = {
+                            showPlaybackSettings = false
+                            pausedBySleepTimer = false
+                            videoPlayer.stopTemporarySpeed()
+                            if (videoPlayer.currentState == GSYVideoView.CURRENT_STATE_AUTO_COMPLETE ||
+                                videoPlayer.currentState == GSYVideoView.CURRENT_STATE_ERROR) {
+                                videoPlayer.setSeekOnStart(0)
+                                videoPlayer.startPlayLogic()
+                            } else {
+                                videoPlayer.gsyVideoManager.seekTo(0)
+                                videoPlayer.onVideoResume()
+                            }
+                        },
+                        onDismiss = { showPlaybackSettings = false }
+                    )
+                }
                 if (showSubtitleDialog) {
                     SubtitlePickerDialog(
                         cloudSubtitles = cloudSubtitleCandidates,
@@ -426,7 +521,10 @@ class VideoActivity : AppCompatActivity() {
         // 启动时自动匹配云盘同目录字幕（在播放器启动后执行）
         autoMatchCloudSubtitle()
 
+        videoPlayer.setVideoAllCallBack(gSYErrorCallBack)
         videoPlayer.startPlayLogic()
+        loadEpisodes()
+        updateEpisodeButtons()
 
         //设置横屏
         lifecycleScope.launch {
@@ -439,10 +537,8 @@ class VideoActivity : AppCompatActivity() {
             }
         }
 
-        videoPlayer.setVideoAllCallBack(gSYErrorCallBack)
-
         onBackPressedDispatcher.addCallback(this) {
-            back()
+            if (!videoPlayer.unlockControlsIfLocked()) back()
         }
     }
 
@@ -460,23 +556,34 @@ class VideoActivity : AppCompatActivity() {
     }
 
     override fun onPause() {
-        videoPlayer.onVideoPause()
+        if (::videoPlayer.isInitialized) {
+            resumeOnForeground = videoPlayer.isActivelyPlaying
+            videoPlayer.stopTemporarySpeed()
+            videoPlayer.onVideoPause()
+        }
         super.onPause()
     }
 
     override fun onResume() {
-        videoPlayer.onVideoResume()
         super.onResume()
+        if (sleepDeadlineMs > 0 && SystemClock.elapsedRealtime() >= sleepDeadlineMs) {
+            pausedBySleepTimer = true
+            resumeOnForeground = false
+        }
+        if (::videoPlayer.isInitialized && resumeOnForeground && !pausedBySleepTimer) videoPlayer.onVideoResume()
+        resumeOnForeground = false
     }
 
     override fun onDestroy() {
+        if (::videoPlayer.isInitialized) videoPlayer.stopTemporarySpeed()
         GSYVideoManager.releaseAllVideos()
         super.onDestroy()
     }
 
 
     private fun back(nav: String = "", toast: String = "", resultCode: Int = RESULT_OK) {
-        val currentDuration = (videoPlayer.currentPositionWhenPlaying / 1000).toInt()
+        if (nav.isEmpty() && videoPlayer.unlockControlsIfLocked()) return
+        val currentDuration = (currentPlaybackPositionMs() / 1000).toInt()
         val fileBeanIndex = intent.getIntExtra("fileBeanIndex", -1)
         // 1. 创建一个新的 Intent 用来装载要返回的数据
         val returnIntent = Intent().apply {
@@ -504,6 +611,29 @@ class VideoActivity : AppCompatActivity() {
     }
 
     val gSYErrorCallBack = object : GSYSampleCallBack() {
+        override fun onPrepared(url: String?, vararg objects: Any?) {
+            videoDurationMs = videoPlayer.duration
+            videoPlayer.setPlaybackSpeed(playbackSpeed)
+        }
+
+        override fun onClickResume(url: String?, vararg objects: Any?) { pausedBySleepTimer = false }
+        override fun onClickResumeFullscreen(url: String?, vararg objects: Any?) { pausedBySleepTimer = false }
+
+        override fun onAutoComplete(url: String?, vararg objects: Any?) {
+            val completedPickCode = videoInfo.pickCode
+            savePlaybackProgress(completedPickCode, (videoDurationMs / 1000).toInt())
+            if (stopAfterEpisode) {
+                stopAfterEpisode = false
+                resumeOnForeground = false
+                App.instance.toast("本集播放结束，已停止连播")
+                return
+            }
+            if (autoPlayNext && !pausedBySleepTimer) videoPlayer.post {
+                if (!isFinishing && !pausedBySleepTimer && videoInfo.pickCode == completedPickCode &&
+                    lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) playAdjacentEpisode(1, automatic = true)
+            }
+        }
+
         override fun onPlayError(url: String?, vararg objects: Any?) {
             val playerManager = videoPlayer.gsyVideoManager.player as? Exo2PlayerManager
             val exoPlayer = playerManager?.mediaPlayer as? ExoPlayer
@@ -514,7 +644,7 @@ class VideoActivity : AppCompatActivity() {
 
             super.onPlayError(url, objects)
             val errorStatus =
-                if (objects[2] != null && videoPlayer.gsyVideoManager.player is Exo2PlayerManager) {
+                if (objects.getOrNull(2) is Int && videoPlayer.gsyVideoManager.player is Exo2PlayerManager) {
                     val code = (objects[2] as Int)
                     playbackErrorMessageMap.getOrDefault(code, "")
                         .ifEmpty { "发生未记录的错误 (错误码: $code)" }
@@ -523,7 +653,6 @@ class VideoActivity : AppCompatActivity() {
                 }
             XLog.e("$title 播放失败 $errorStatus")
             Toast.makeText(baseContext, errorStatus, Toast.LENGTH_SHORT).show()
-            finish()
         }
     }
 
@@ -619,18 +748,26 @@ class VideoActivity : AppCompatActivity() {
     }
 
     fun playNewVideo() {
-        // 如果已经在重新获取链接中，直接跳过
         if (isReloadingVideo) return
         isReloadingVideo = true
+        val requestedPickCode = videoInfo.pickCode
+        val session = subtitleSession
         App.instance.toast("视频地址错误！正在重新获取新链接")
         lifecycleScope.launch {
             try {
-                val fileRepository = FileRepository.getInstance()
-                val video = fileRepository.video(videoInfo.pickCode)
-                XLog.i("playNewVideo $video")
-                this@VideoActivity.videoPlayer.playNext(video.downloadUrl, video.fileName)
-            } catch (e: Exception) {
-                isReloadingVideo = false // 异常时重置标志位
+                val video = FileRepository.getInstance().video(requestedPickCode)
+                if (session != subtitleSession || videoInfo.pickCode != requestedPickCode ||
+                    switchingEpisodeName.isNotEmpty()) return@launch
+                val address = video.downloadUrl.ifEmpty { video.videoUrl }
+                check(address.isNotBlank()) { "重新获取的视频地址为空" }
+                videoPlayer.stopTemporarySpeed()
+                videoPlayer.setSeekOnStart(currentPlaybackPositionMs())
+                videoPlayer.playNext(address, videoInfo.fileName)
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                XLog.e("重新获取视频链接失败", error)
+            } finally {
+                if (session == subtitleSession) isReloadingVideo = false
             }
         }
     }
@@ -655,6 +792,234 @@ class VideoActivity : AppCompatActivity() {
         )
     }
 
+    // ======================= 播放列表与播放设置 =======================
+
+    private fun changePlaybackSpeed(value: Float) {
+        playbackSpeed = value
+        videoPlayer.setPlaybackSpeed(value)
+        lifecycleScope.launch { DataStoreUtil.putDataSuspend(ConfigKeyUtil.PLAYER_SPEED, value) }
+    }
+
+    private fun changeAutoNext(value: Boolean) {
+        autoPlayNext = value
+        lifecycleScope.launch { DataStoreUtil.putDataSuspend(ConfigKeyUtil.PLAYER_AUTO_NEXT, value) }
+    }
+
+    private fun setSleepTimer(minutes: Int) {
+        sleepTimerJob?.cancel()
+        sleepTimerSeconds = 0
+        sleepDeadlineMs = 0
+        pausedBySleepTimer = false
+        stopAfterEpisode = false
+        if (minutes <= 0) return
+        val deadline = SystemClock.elapsedRealtime() + minutes * 60_000L
+        sleepDeadlineMs = deadline
+        sleepTimerJob = lifecycleScope.launch {
+            while (true) {
+                val remaining = deadline - SystemClock.elapsedRealtime()
+                if (remaining <= 0) break
+                sleepTimerSeconds = (remaining + 999) / 1000
+                delay(1000)
+            }
+            sleepTimerSeconds = 0
+            sleepDeadlineMs = 0
+            pausedBySleepTimer = true
+            resumeOnForeground = false
+            videoPlayer.stopTemporarySpeed()
+            videoPlayer.onVideoPause()
+            App.instance.toast("定时结束，播放已暂停")
+        }
+    }
+
+    private fun loadEpisodes(force: Boolean = false) {
+        val cid = videoParentCid
+        if (cid.isBlank()) {
+            episodeError = "缺少视频所在目录信息，请从网盘文件列表打开视频"
+            return
+        }
+        if (!force && (episodeLoading || (episodeDirectory == cid && episodeFiles.isNotEmpty()))) return
+        episodeLoadJob?.cancel()
+        episodeLoading = true
+        episodeError = ""
+        val current = videoInfo
+        episodeLoadJob = lifecycleScope.launch {
+            try {
+                val files = withContext(Dispatchers.IO) {
+                    val collected = mutableListOf<FileBean>()
+                    val seen = mutableSetOf<String>()
+                    var offset = 0
+                    do {
+                        ensureActive()
+                        val page = FileRepository.getInstance().getFiles(
+                            cid = cid, showDir = 0, limit = 1150, offset = offset
+                        )
+                        if (page.fileBeanList.isEmpty()) break
+                        val fresh = page.fileBeanList.filter { seen.add(it.fileId.ifEmpty { it.categoryId }) }
+                        check(fresh.isNotEmpty()) { "目录分页返回重复数据，请重试" }
+                        collected.addAll(fresh)
+                        offset += page.fileBeanList.size
+                    } while (offset < page.count)
+                    if (collected.none { it.pickCode == current.pickCode }) {
+                        collected.add(FileBean(
+                            fileId = current.fileId.ifEmpty { "current-${current.pickCode}" },
+                            pickCode = current.pickCode, parentId = cid, name = current.fileName, isVideo = 1
+                        ))
+                    }
+                    PlaybackUtil.episodes(collected)
+                }
+                if (videoParentCid == cid) {
+                    episodeFiles = files
+                    episodeDirectory = cid
+                }
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                episodeError = "选集列表加载失败，请重试"
+                XLog.e("加载选集失败", error)
+            } finally {
+                if (isActive) {
+                    episodeLoading = false
+                    updateEpisodeButtons()
+                }
+            }
+        }
+    }
+
+    private fun updateEpisodeButtons() {
+        val current = episodeFiles.indexOfFirst { it.pickCode == videoInfo.pickCode }
+        for ((id, direction) in listOf(R.id.previousEpisodeButton to -1, R.id.nextEpisodeButton to 1)) {
+            val enabled = switchingEpisodeName.isEmpty() &&
+                PlaybackUtil.adjacentIndex(episodeFiles.size, current, direction) != null
+            videoPlayer.findViewById<View>(id).apply {
+                isEnabled = enabled
+                alpha = if (enabled) 1f else 0.35f
+            }
+        }
+    }
+
+    private fun playAdjacentEpisode(direction: Int, automatic: Boolean = false) {
+        if (switchingEpisodeName.isNotEmpty()) return
+        val requestedFrom = videoInfo.pickCode
+        lifecycleScope.launch {
+            if (episodeFiles.isEmpty()) {
+                loadEpisodes()
+                episodeLoadJob?.join()
+            }
+            if (videoInfo.pickCode != requestedFrom ||
+                (automatic && (!autoPlayNext || pausedBySleepTimer || stopAfterEpisode))) return@launch
+            val current = episodeFiles.indexOfFirst { it.pickCode == requestedFrom }
+            val next = PlaybackUtil.adjacentIndex(episodeFiles.size, current, direction)
+            if (next == null) {
+                App.instance.toast(if (direction > 0) "已是最后一集" else "已是第一集")
+                return@launch
+            }
+            switchEpisode(episodeFiles[next], automatic)
+        }
+    }
+
+    private fun currentPlaybackPositionMs(): Long =
+        if (videoPlayer.currentState == GSYVideoView.CURRENT_STATE_AUTO_COMPLETE) videoDurationMs
+        else videoPlayer.currentPositionWhenPlaying
+
+    private fun savePlaybackProgress(pickCode: String, seconds: Int) {
+        if (pickCode.isBlank()) return
+        episodeFiles = episodeFiles.map {
+            if (it.pickCode == pickCode) it.copy(currentPlayTime = seconds.coerceAtLeast(0)) else it
+        }
+        lifecycleScope.launch {
+            try {
+                FileRepository.getInstance().videoHistory(mapOf(
+                    "op" to "update", "pick_code" to pickCode, "time" to seconds.coerceAtLeast(0).toString(),
+                    "category" to "1", "format" to "json"
+                ))
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                XLog.e("保存视频进度失败", error)
+            }
+        }
+    }
+
+    private fun switchEpisode(file: FileBean, automatic: Boolean = false) {
+        if (file.pickCode == videoInfo.pickCode) { showEpisodeDialog = false; return }
+        if (switchingEpisodeName.isNotEmpty()) return
+        episodeSwitchJob?.cancel()
+        switchingEpisodeName = file.name
+        if (!automatic) pausedBySleepTimer = false
+        updateEpisodeButtons()
+        val previous = videoInfo
+        episodeSwitchJob = lifecycleScope.launch {
+            try {
+                val next = if (videoLinkMode) {
+                    FileRepository.getInstance().video(file.pickCode).copy(
+                        pickCode = file.pickCode, fileName = file.name,
+                        parentId = file.parentId.ifEmpty { previous.parentId },
+                        fileId = file.fileId, index = -1, isAutoRotate = previous.isAutoRotate
+                    )
+                } else {
+                    VideoInfoBean(
+                        pickCode = file.pickCode, fileName = file.name,
+                        parentId = file.parentId.ifEmpty { previous.parentId }, fileId = file.fileId,
+                        width = previous.width, height = previous.height, isAutoRotate = previous.isAutoRotate,
+                        videoUrl = "http://115.com/api/video/m3u8/${file.pickCode}.m3u8"
+                    )
+                }
+                val address = next.videoUrl.ifEmpty { next.downloadUrl }
+                check(address.isNotBlank()) { "视频地址为空" }
+                // 自动完成回调已保存完整时长，不要再用播放器归零后的进度覆盖它。
+                if (!automatic) savePlaybackProgress(previous.pickCode, (currentPlaybackPositionMs() / 1000).toInt())
+                videoPlayer.stopTemporarySpeed()
+                videoPlayer.unlockControlsIfLocked()
+                resetSubtitlesForEpisode(next.fileName)
+                videoPlayer.onVideoReset()
+                videoInfo = next
+                videoDurationMs = 0
+                check(videoPlayer.setUp(address, false, null, hashMapOf(
+                    "cookie" to UserSessionManager.cookie, "User-Agent" to ConfigKeyUtil.USER_AGENT
+                ), next.fileName)) { "播放器暂时无法切换，请重试" }
+                val resume = if (automatic) 0L else PlaybackUtil.resumePosition(
+                    file.currentPlayTime * 1000L, (file.playLong * 1000).toLong()
+                )
+                videoPlayer.setSeekOnStart(resume)
+                videoPlayer.setPlaybackSpeed(playbackSpeed)
+                videoPlayer.startPlayLogic()
+                if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+                    videoPlayer.onVideoPause()
+                    resumeOnForeground = true
+                }
+                autoMatchCloudSubtitle()
+                showEpisodeDialog = false
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                XLog.e("切换选集失败: ${file.name}", error)
+                App.instance.toast("打开选集失败，请重试或选择其它视频")
+            } finally {
+                if (isActive) {
+                    switchingEpisodeName = ""
+                    updateEpisodeButtons()
+                }
+            }
+        }
+    }
+
+    private fun resetSubtitlesForEpisode(title: String) {
+        subtitleSession++
+        subtitleSelectionId++
+        isReloadingVideo = false
+        onlineSearchJob?.cancel()
+        isSearchingOnline = false
+        isSearchingCloud = false
+        cloudSubtitleCandidates.clear()
+        onlineSubtitleCandidates.clear()
+        searchError = ""
+        subtitleSearchKeyword = title
+        lastOnlineSearchKeyword = null
+        activeSubtitleName = null
+        subtitleDelayMs = 0
+        browseState = SubtitleBrowseState()
+        showSubtitleDialog = false
+        videoPlayer.setSubtitleSource(null)
+        applySubtitleDelay(0)
+    }
+
     // ======================= 字幕逻辑 =======================
 
     /**
@@ -675,15 +1040,20 @@ class VideoActivity : AppCompatActivity() {
      */
     private fun autoMatchCloudSubtitle() {
         if (videoParentCid.isEmpty()) return
+        val session = subtitleSession
+        val selection = subtitleSelectionId
+        val info = videoInfo
         lifecycleScope.launch {
             // 直接等待搜索完成后再取第一个候选
             val result = subtitleRepository.searchCloudSubtitles(
-                videoParentCid, videoInfo.fileName
+                info.parentId, info.fileName
             )
+            if (session != subtitleSession) return@launch
             cloudSubtitleCandidates.clear()
             cloudSubtitleCandidates.addAll(result)
             // 自动挂载第一个匹配的同目录字幕
             val first = result.firstOrNull() ?: return@launch
+            if (selection != subtitleSelectionId || activeSubtitleName != null) return@launch
             loadCloudSubtitle(first, toastOnFail = false)
         }
     }
@@ -692,10 +1062,13 @@ class VideoActivity : AppCompatActivity() {
         // 避免并发搜索：进行中直接跳过
         if (isSearchingCloud) return
         isSearchingCloud = true
+        val session = subtitleSession
+        val info = videoInfo
         lifecycleScope.launch {
             val result = subtitleRepository.searchCloudSubtitles(
-                videoParentCid, videoInfo.fileName
+                info.parentId, info.fileName
             )
+            if (session != subtitleSession) return@launch
             cloudSubtitleCandidates.clear()
             cloudSubtitleCandidates.addAll(result)
             isSearchingCloud = false
@@ -732,9 +1105,13 @@ class VideoActivity : AppCompatActivity() {
      * 加载 115 云盘同目录字幕：下载 -> 转换 -> 挂载
      */
     private fun loadCloudSubtitle(fileBean: FileBean, toastOnFail: Boolean = true) {
+        val session = subtitleSession
+        val selection = ++subtitleSelectionId
         lifecycleScope.launch {
             val localFile = subtitleRepository.downloadCloudSubtitle(fileBean, subtitleCacheDir)
-            val mounted = localFile != null && mountSubtitleFile(localFile)
+            if (session != subtitleSession || selection != subtitleSelectionId) return@launch
+            val mounted = localFile != null && mountSubtitleFile(localFile, session, selection)
+            if (session != subtitleSession || selection != subtitleSelectionId) return@launch
             if (mounted) {
                 activeSubtitleName = fileBean.name
                 App.instance.toast("字幕已挂载: ${fileBean.name}")
@@ -749,11 +1126,15 @@ class VideoActivity : AppCompatActivity() {
      * 加载迅雷在线字幕：下载 -> 转换 -> 挂载
      */
     private fun loadOnlineSubtitle(bean: XunleiSubtitleBean) {
+        val session = subtitleSession
+        val selection = ++subtitleSelectionId
         lifecycleScope.launch {
             val localFile = subtitleRepository.downloadSubtitle(
                 bean.url, bean.name, subtitleCacheDir, fileExtension = bean.ext
             )
-            val mounted = localFile != null && mountSubtitleFile(localFile)
+            if (session != subtitleSession || selection != subtitleSelectionId) return@launch
+            val mounted = localFile != null && mountSubtitleFile(localFile, session, selection)
+            if (session != subtitleSession || selection != subtitleSelectionId) return@launch
             if (mounted) {
                 activeSubtitleName = bean.name
                 App.instance.toast("字幕已挂载: ${bean.name}")
@@ -767,7 +1148,7 @@ class VideoActivity : AppCompatActivity() {
      * 把本地字幕文件（srt/ass/ssa/vtt）挂载到 GSY 播放器
      * ass/ssa 会先转换为 srt；文件读写放在 IO 线程，避免卡 UI
      */
-    private suspend fun mountSubtitleFile(file: File): Boolean =
+    private suspend fun mountSubtitleFile(file: File, session: Int, selection: Int): Boolean =
         withContext(Dispatchers.IO) {
             runCatching {
                 val playbackFile = SubtitleConvertUtil.prepareForPlayback(file, subtitleCacheDir)
@@ -777,6 +1158,9 @@ class VideoActivity : AppCompatActivity() {
                 ).setLabel(file.name).build()
                 // setSubtitleSource 内部仅做 UI 操作，切回主线程
                 withContext(Dispatchers.Main) {
+                    if (session != subtitleSession || selection != subtitleSelectionId) {
+                        throw CancellationException("字幕请求已被新的选集或选择替代")
+                    }
                     videoPlayer.setSubtitleSource(source)
                     // 字幕控制器可能被重建，重新套用样式与延迟
                     applySubtitleStyle(subtitleStyle)
@@ -784,6 +1168,7 @@ class VideoActivity : AppCompatActivity() {
                 }
                 true
             }.onFailure {
+                if (it is CancellationException) throw it
                 XLog.e("挂载字幕失败: ${file.name}", it)
             }.getOrDefault(false)
         }
@@ -812,10 +1197,12 @@ class VideoActivity : AppCompatActivity() {
     }
 
     private fun openBrowseFolder(cid: String) {
-        browseState = browseState.copy(active = true, loading = true, error = "")
+        val session = subtitleSession
+        browseState = browseState.copy(active = true, loading = true, cid = cid, error = "")
         lifecycleScope.launch {
             runCatching { subtitleRepository.listFolder(cid) }
                 .onSuccess { listing ->
+                    if (session != subtitleSession || !browseState.active || browseState.cid != cid) return@onSuccess
                     val matched = listing.subtitles
                         .filter { subtitleRepository.matchesVideo(videoInfo.fileName, it.name) }
                         .map { it.fileId }
@@ -831,6 +1218,8 @@ class VideoActivity : AppCompatActivity() {
                     )
                 }
                 .onFailure {
+                    if (it is CancellationException) throw it
+                    if (session != subtitleSession || !browseState.active || browseState.cid != cid) return@onFailure
                     XLog.e("浏览网盘目录失败: $cid", it)
                     browseState = browseState.copy(
                         loading = false,
@@ -849,13 +1238,16 @@ class VideoActivity : AppCompatActivity() {
     // ---------------- 本机字幕 ----------------
 
     private fun loadLocalSubtitle(uri: Uri) {
+        val session = subtitleSession
+        val selection = ++subtitleSelectionId
         lifecycleScope.launch {
             val file = subtitleRepository.importLocalSubtitle(applicationContext, uri, subtitleCacheDir)
+            if (session != subtitleSession || selection != subtitleSelectionId) return@launch
             if (file == null) {
                 App.instance.toast("无法读取所选字幕（仅支持 srt/ass/ssa/vtt）")
                 return@launch
             }
-            if (mountSubtitleFile(file)) {
+            if (mountSubtitleFile(file, session, selection)) {
                 activeSubtitleName = file.name
                 App.instance.toast("字幕已挂载: ${file.name}")
             } else {
@@ -865,6 +1257,7 @@ class VideoActivity : AppCompatActivity() {
     }
 
     private fun clearSubtitle() {
+        subtitleSelectionId++
         runCatching { videoPlayer.setSubtitleSource(null) }
         activeSubtitleName = null
     }

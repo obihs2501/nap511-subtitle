@@ -1,42 +1,125 @@
- 
-name: Release
+name: Release APK
+
 on:
   push:
-    tags:
-      - "v*"
+    branches: [ "main" ]
+    paths:
+      - 'app/**'
+      - 'build.gradle.kts'
+      - 'settings.gradle.kts'
+      - 'gradle/**'
+      - '.github/workflows/release.yml'
+  workflow_dispatch:
 
 jobs:
-  build:
+  build_release:
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-java@v3
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: 17
-      - uses: gradle/gradle-build-action@v2
-        with:
-          gradle-version: current
-          arguments: assembleRelease
-          
-      - uses: ilharp/sign-android-release@v1
-        id: sign_app
-        with:
-          releaseDir: app/build/outputs/apk/release
-          signingKey: ${{ secrets.ANDROID_SIGNING_KEY }}
-          keyAlias: ${{ secrets.ANDROID_KEY_ALIAS }}
-          keyStorePassword: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          keyPassword: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          buildToolsVersion: 35.0.0
+          java-version: '17'
 
-      - run: mv ${{steps.sign_app.outputs.signedFile}} nap511_$GITHUB_REF_NAME.apk
-      - uses: ncipollo/release-action@v1
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
         with:
-          artifacts: "*.apk"
-          token: ${{ github.token }}
-          generateReleaseNotes: true
-          allowUpdates: true
-          replacesArtifacts: true
+          cache-read-only: false
+          build-scan-publish: false
 
+      - name: Prepare version
+        id: version
+        shell: bash
+        run: |
+          chmod +x ./gradlew
+          VERSION=$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -n 1)
+          SHA=$(git rev-parse --short=7 HEAD)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "tag=v${VERSION}-${SHA}" >> "$GITHUB_OUTPUT"
+          echo "apk=nap511-${VERSION}-release-${SHA}.apk" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare release signing key
+        env:
+          SIGNING_KEY: ${{ secrets.ANDROID_SIGNING_KEY }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import base64, os
+          from pathlib import Path
+          key = os.environ.get('SIGNING_KEY', '')
+          if not key:
+              raise SystemExit('ANDROID_SIGNING_KEY is not configured; refusing an unsigned release.')
+          path = Path(os.environ['RUNNER_TEMP']) / 'nap511-release.jks'
+          path.write_bytes(base64.b64decode(key, validate=True))
+          path.chmod(0o600)
+          PY
+
+      # 只在这一个普通构建任务内运行 JVM 单测；不启动模拟器或额外虚拟机。
+      - name: Test and build signed Release APK
+        env:
+          NAP511_SIGNING_STORE_FILE: ${{ runner.temp }}/nap511-release.jks
+          NAP511_SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          NAP511_SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          NAP511_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: ./gradlew testReleaseUnitTest assembleRelease --stacktrace
+
+      - name: Upload unit test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-unit-test-reports
+          path: |
+            app/build/reports/tests/testReleaseUnitTest/
+            app/build/test-results/testReleaseUnitTest/
+          if-no-files-found: ignore
+          retention-days: 3
+
+      - name: Verify Release signature and package
+        shell: bash
+        run: |
+          APK=app/build/outputs/apk/release/app-release.apk
+          test -f "$APK"
+          BUILD_TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
+          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$APK"
+          "$BUILD_TOOLS/aapt" dump badging "$APK" > "$RUNNER_TEMP/nap511-release-badging.txt"
+          if grep -q 'application-debuggable' "$RUNNER_TEMP/nap511-release-badging.txt"; then
+            echo 'Refusing to publish a debuggable APK'
+            exit 1
+          fi
+          cp "$APK" '${{ steps.version.outputs.apk }}'
+
+      - name: Publish Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: "nap511 ${{ steps.version.outputs.version }} Release (${{ steps.version.outputs.sha }})"
+          prerelease: false
+          make_latest: 'true'
+          files: ${{ steps.version.outputs.apk }}
+          body: |
+            ## Release APK（非 Debug，固定签名）
+            - 修复 Android ICU 正则导致 ASS 字幕初始化及挂载失败。
+            - 在线字幕关键词搜索；本机及网盘字幕、字幕样式和同步。
+            - 长按临时倍速、0.5–3× 播放速度、双击快进/快退。
+            - 同目录选集、上一集/下一集、自动连播开关、历史进度续播。
+            - 锁屏防误触、定时暂停、本集结束后停止。
+            - 提交：${{ github.sha }}
+
+            初次从不同签名的 Debug / 上游版本切换时，可能需要卸载旧版；后续本仓库 Release 使用同一签名。
+
+      - name: Remove temporary signing key
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          (Path(os.environ['RUNNER_TEMP']) / 'nap511-release.jks').unlink(missing_ok=True)
+          PY
